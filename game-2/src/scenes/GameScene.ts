@@ -1,10 +1,20 @@
 import Phaser from "phaser";
 import { createTextures } from "../textures";
 import { generateLevel, type LevelData } from "../level";
+import {
+  playCoin,
+  playFlap,
+  playHurt,
+  playJump,
+  playPowerup,
+  playQBlock,
+  playWarp,
+} from "../sounds";
 
 const TILE = 32;
 const PLAYER_SPEED = 220;
 const JUMP_VELOCITY = -520;
+const FLAP_VELOCITY = -380;
 const WORLD_WIDTH = 6400; // 200 tiles wide
 const WORLD_HEIGHT = 800; // extended downward for safe pits
 
@@ -13,6 +23,7 @@ export class GameScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: Record<string, Phaser.Input.Keyboard.Key>;
   private platforms!: Phaser.Physics.Arcade.StaticGroup;
+  private questionBlocks!: Phaser.Physics.Arcade.StaticGroup;
   private coins!: Phaser.Physics.Arcade.StaticGroup;
   private enemies!: Phaser.Physics.Arcade.Group;
   private score = 0;
@@ -20,6 +31,11 @@ export class GameScene extends Phaser.Scene {
   private maxCameraX = 0;
   private isDead = false;
   private levelData!: LevelData;
+  private warpPipes: { x: number; topY: number }[] = [];
+  private inPipeTransition = false;
+  private hasCape = false;
+  private capeInvincible = false;
+  private capeSprite?: Phaser.GameObjects.Image;
   private checkpointReached = false;
   private checkpointX = 0;
   private checkpointY = 0;
@@ -36,6 +52,11 @@ export class GameScene extends Phaser.Scene {
     this.score = data?.score ?? 0;
     this.maxCameraX = 0;
     this.isDead = false;
+    this.inPipeTransition = false;
+    this.warpPipes = [];
+    this.hasCape = false;
+    this.capeInvincible = false;
+    this.capeSprite = undefined;
     this.checkpointReached = false;
     this.checkpointScore = 0;
 
@@ -53,6 +74,7 @@ export class GameScene extends Phaser.Scene {
 
     // Platforms
     this.platforms = this.physics.add.staticGroup();
+    this.questionBlocks = this.physics.add.staticGroup();
     this.buildPlatforms();
 
     // Coins
@@ -73,6 +95,14 @@ export class GameScene extends Phaser.Scene {
     // Collisions
     this.physics.add.collider(this.player, this.platforms);
     this.physics.add.collider(this.enemies, this.platforms);
+    this.physics.add.collider(
+      this.player,
+      this.questionBlocks,
+      this.hitQuestionBlock,
+      undefined,
+      this
+    );
+    this.physics.add.collider(this.enemies, this.questionBlocks);
     this.physics.add.overlap(
       this.player,
       this.coins,
@@ -153,7 +183,17 @@ export class GameScene extends Phaser.Scene {
   }
 
   update(): void {
-    if (this.isDead) return;
+    if (this.capeSprite) {
+      const offsetX = this.player.flipX ? 8 : -8;
+      this.capeSprite.setPosition(
+        this.player.x + offsetX,
+        this.player.y + 2
+      );
+      this.capeSprite.setAlpha(this.player.alpha);
+      this.capeSprite.setFlipX(this.player.flipX);
+    }
+
+    if (this.isDead || this.inPipeTransition) return;
 
     const body = this.player.body as Phaser.Physics.Arcade.Body;
     const onGround = body.blocked.down;
@@ -165,6 +205,22 @@ export class GameScene extends Phaser.Scene {
       Phaser.Input.Keyboard.JustDown(this.cursors.up) ||
       Phaser.Input.Keyboard.JustDown(this.cursors.space) ||
       Phaser.Input.Keyboard.JustDown(this.wasd.up);
+    const down =
+      Phaser.Input.Keyboard.JustDown(this.cursors.down) ||
+      Phaser.Input.Keyboard.JustDown(this.wasd.down);
+
+    // Enter warp pipe when pressing down while standing on top of one
+    if (down && onGround) {
+      for (const wp of this.warpPipes) {
+        if (
+          Math.abs(this.player.x - wp.x) < 20 &&
+          this.player.y < wp.topY - 5
+        ) {
+          this.enterWarpPipe(wp);
+          return;
+        }
+      }
+    }
 
     if (left) {
       this.player.setVelocityX(-PLAYER_SPEED);
@@ -176,9 +232,15 @@ export class GameScene extends Phaser.Scene {
       this.player.setVelocityX(0);
     }
 
-    // Jump
-    if (jump && onGround) {
-      this.player.setVelocityY(JUMP_VELOCITY);
+    // Jump / flap
+    if (jump) {
+      if (onGround) {
+        this.player.setVelocityY(JUMP_VELOCITY);
+        playJump();
+      } else if (this.hasCape) {
+        this.player.setVelocityY(FLAP_VELOCITY);
+        playFlap();
+      }
     }
 
     // Animations
@@ -190,20 +252,27 @@ export class GameScene extends Phaser.Scene {
       this.player.play("idle", true);
     }
 
-    // Prevent going back: clamp player to max camera X
-    this.maxCameraX = Math.max(
-      this.maxCameraX,
-      this.cameras.main.scrollX
-    );
-    this.cameras.main.scrollX = Math.max(
-      this.cameras.main.scrollX,
-      this.maxCameraX
-    );
-    // Prevent player from going left of camera
-    const leftBound = this.maxCameraX + 8;
-    if (this.player.x < leftBound) {
-      this.player.x = leftBound;
-      body.velocity.x = Math.max(0, body.velocity.x);
+    // Prevent going back - relaxed while caped so the player can fly anywhere
+    if (!this.hasCape) {
+      this.maxCameraX = Math.max(
+        this.maxCameraX,
+        this.cameras.main.scrollX
+      );
+      this.cameras.main.scrollX = Math.max(
+        this.cameras.main.scrollX,
+        this.maxCameraX
+      );
+      const leftBound = this.maxCameraX + 8;
+      if (this.player.x < leftBound) {
+        this.player.x = leftBound;
+        body.velocity.x = Math.max(0, body.velocity.x);
+      }
+    } else {
+      // Keep player inside the world horizontally
+      if (this.player.x < 8) {
+        this.player.x = 8;
+        body.velocity.x = Math.max(0, body.velocity.x);
+      }
     }
 
     // Fall death - only if below the safe pit floor level
@@ -331,18 +400,29 @@ export class GameScene extends Phaser.Scene {
     // Floating platforms (brick / question blocks)
     for (const plat of floatingPlatforms) {
       for (let i = 0; i < plat.width; i++) {
-        const tex = plat.type === "question" ? "qblock" : "brick";
-        const block = this.platforms
-          .create(
-            (plat.x + i) * TILE + TILE / 2,
-            plat.y * TILE + TILE / 2,
-            tex,
-            0
-          )
-          .setSize(TILE, TILE)
-          .refreshBody();
         if (plat.type === "question") {
-          (block as Phaser.Physics.Arcade.Sprite).play?.("qblock-shine");
+          const block = this.questionBlocks
+            .create(
+              (plat.x + i) * TILE + TILE / 2,
+              plat.y * TILE + TILE / 2,
+              "qblock",
+              0
+            )
+            .setSize(TILE, TILE)
+            .refreshBody() as Phaser.Physics.Arcade.Sprite;
+          block.setData("used", false);
+          block.setData("contains", Math.random() < 0.33 ? "feather" : "coin");
+          block.play("qblock-shine");
+        } else {
+          this.platforms
+            .create(
+              (plat.x + i) * TILE + TILE / 2,
+              plat.y * TILE + TILE / 2,
+              "brick",
+              0
+            )
+            .setSize(TILE, TILE)
+            .refreshBody();
         }
       }
     }
@@ -403,10 +483,17 @@ export class GameScene extends Phaser.Scene {
 
     // Pipes
     for (const p of pipes) {
-      const pipeSprite = this.platforms
-        .create(p.x * TILE + 24, p.y * TILE - 16, "pipe")
+      const cx = p.x * TILE + 24;
+      const cy = p.y * TILE - 16;
+      const texture = p.canWarp ? "pipe-warp" : "pipe";
+      this.platforms
+        .create(cx, cy, texture)
         .setSize(48, 64)
         .refreshBody();
+      if (p.canWarp) {
+        // Track top-center of this pipe for down-warp detection
+        this.warpPipes.push({ x: cx, topY: cy - 32 });
+      }
     }
   }
 
@@ -449,6 +536,7 @@ export class GameScene extends Phaser.Scene {
     (coin as Phaser.Physics.Arcade.Sprite).destroy();
     this.score += 100;
     this.scoreText.setText(`Score: ${this.score}`);
+    playCoin();
   }
 
   private hitEnemy(
@@ -465,9 +553,234 @@ export class GameScene extends Phaser.Scene {
       this.player.setVelocityY(-300); // bounce
       this.score += 200;
       this.scoreText.setText(`Score: ${this.score}`);
-    } else {
-      this.playerDeath();
+      return;
     }
+    if (this.capeInvincible) return;
+    if (this.hasCape) {
+      this.loseCape();
+      return;
+    }
+    this.playerDeath();
+  }
+
+  private hitQuestionBlock(
+    _player:
+      | Phaser.Types.Physics.Arcade.GameObjectWithBody
+      | Phaser.Tilemaps.Tile,
+    block: Phaser.Types.Physics.Arcade.GameObjectWithBody | Phaser.Tilemaps.Tile
+  ): void {
+    const sprite = block as Phaser.Physics.Arcade.Sprite;
+    if (sprite.getData("used")) return;
+
+    const playerBody = this.player.body as Phaser.Physics.Arcade.Body;
+    const blockBody = sprite.body as Phaser.Physics.Arcade.StaticBody;
+    // Only trigger when player hits the block from below
+    if (!(playerBody.touching.up && blockBody.touching.down)) return;
+
+    sprite.setData("used", true);
+    sprite.anims.stop();
+    sprite.setTexture("qblock-used");
+    playQBlock();
+
+    // Bump animation - visual only, static body stays put
+    const baseY = sprite.y;
+    this.tweens.add({
+      targets: sprite,
+      y: baseY - 8,
+      duration: 90,
+      yoyo: true,
+      ease: "Quad.easeOut",
+    });
+
+    const contains = sprite.getData("contains") as "coin" | "feather";
+    if (contains === "feather") {
+      this.spawnFeather(sprite.x, baseY - TILE / 2);
+    } else {
+      this.popCoinReward(sprite.x, sprite.y - TILE / 2);
+      this.score += 200;
+      this.scoreText.setText(`Score: ${this.score}`);
+    }
+  }
+
+  private popCoinReward(x: number, startY: number): void {
+    const popCoin = this.add.sprite(x, startY, "coin", 0).setDepth(6);
+    popCoin.play("coin-spin");
+    this.tweens.add({
+      targets: popCoin,
+      y: startY - TILE * 1.6,
+      duration: 260,
+      ease: "Quad.easeOut",
+      onComplete: () => {
+        this.tweens.add({
+          targets: popCoin,
+          y: startY - TILE * 0.8,
+          alpha: 0,
+          duration: 180,
+          ease: "Quad.easeIn",
+          onComplete: () => popCoin.destroy(),
+        });
+      },
+    });
+  }
+
+  private spawnFeather(x: number, startY: number): void {
+    const feather = this.physics.add.sprite(x, startY, "feather");
+    feather.setDepth(6);
+    const fbody = feather.body as Phaser.Physics.Arcade.Body;
+    fbody.setAllowGravity(false);
+    fbody.setImmovable(true);
+
+    // Pop up out of the block, then bob in place
+    const restY = startY - TILE * 1.5;
+    this.tweens.add({
+      targets: feather,
+      y: restY,
+      duration: 350,
+      ease: "Sine.easeOut",
+      onComplete: () => {
+        this.tweens.add({
+          targets: feather,
+          y: restY - 6,
+          duration: 900,
+          yoyo: true,
+          repeat: -1,
+          ease: "Sine.easeInOut",
+        });
+      },
+    });
+
+    this.physics.add.overlap(
+      this.player,
+      feather,
+      () => this.collectFeather(feather),
+      undefined,
+      this
+    );
+  }
+
+  private collectFeather(feather: Phaser.Physics.Arcade.Sprite): void {
+    feather.destroy();
+    if (this.hasCape) {
+      // Already caped - small bonus instead
+      this.score += 1000;
+      this.scoreText.setText(`Score: ${this.score}`);
+      playPowerup();
+      return;
+    }
+    this.hasCape = true;
+    this.player.setTint(0xffd94a);
+    this.capeSprite = this.add
+      .image(this.player.x, this.player.y, "cape")
+      .setDepth(9)
+      .setOrigin(0.5, 0.4);
+    // Subtle flutter
+    this.tweens.add({
+      targets: this.capeSprite,
+      scaleY: 1.08,
+      duration: 260,
+      yoyo: true,
+      repeat: -1,
+      ease: "Sine.easeInOut",
+    });
+    playPowerup();
+  }
+
+  private loseCape(): void {
+    this.hasCape = false;
+    this.capeInvincible = true;
+    this.player.clearTint();
+    if (this.capeSprite) {
+      const cape = this.capeSprite;
+      this.capeSprite = undefined;
+      this.tweens.add({
+        targets: cape,
+        alpha: 0,
+        y: cape.y - 20,
+        duration: 400,
+        onComplete: () => cape.destroy(),
+      });
+    }
+    playHurt();
+
+    // Brief invincibility flash
+    this.tweens.add({
+      targets: this.player,
+      alpha: 0.3,
+      duration: 90,
+      yoyo: true,
+      repeat: 10,
+      onComplete: () => {
+        this.player.setAlpha(1);
+        this.capeInvincible = false;
+      },
+    });
+  }
+
+  private enterWarpPipe(wp: { x: number; topY: number }): void {
+    if (this.inPipeTransition) return;
+    this.inPipeTransition = true;
+
+    const body = this.player.body as Phaser.Physics.Arcade.Body;
+    body.enable = false;
+    this.player.setX(wp.x);
+    this.player.play("idle", true);
+    playWarp();
+
+    this.tweens.add({
+      targets: this.player,
+      y: wp.topY + 40,
+      alpha: 0,
+      duration: 450,
+      ease: "Sine.easeIn",
+      onComplete: () => {
+        this.cameras.main.fadeOut(250, 0, 0, 0);
+        this.cameras.main.once("camerafadeoutcomplete", () => {
+          this.openBonusScene(wp);
+        });
+      },
+    });
+  }
+
+  private openBonusScene(wp: { x: number; topY: number }): void {
+    const bonus = this.scene.get("BonusScene");
+    bonus.events.once("bonus-complete", (scoreDelta: number) => {
+      this.scene.stop("BonusScene");
+      this.scene.resume();
+      this.returnFromPipe(wp, scoreDelta);
+    });
+    this.scene.pause();
+    this.scene.launch("BonusScene");
+  }
+
+  private returnFromPipe(
+    wp: { x: number; topY: number },
+    scoreDelta: number
+  ): void {
+    if (scoreDelta > 0) {
+      this.score += scoreDelta;
+      this.scoreText.setText(`Score: ${this.score}`);
+    }
+
+    this.cameras.main.fadeIn(300, 0, 0, 0);
+
+    const body = this.player.body as Phaser.Physics.Arcade.Body;
+    body.enable = false;
+    this.player.setPosition(wp.x, wp.topY + 40);
+    this.player.setAlpha(0);
+    playWarp();
+
+    this.tweens.add({
+      targets: this.player,
+      y: wp.topY - 30,
+      alpha: 1,
+      duration: 400,
+      ease: "Sine.easeOut",
+      onComplete: () => {
+        body.enable = true;
+        body.setVelocity(0, 0);
+        this.inPipeTransition = false;
+      },
+    });
   }
 
   private reachCheckpoint(): void {
@@ -502,7 +815,14 @@ export class GameScene extends Phaser.Scene {
   private playerDeath(): void {
     if (this.isDead) return;
     this.isDead = true;
+    this.hasCape = false;
+    this.capeInvincible = false;
+    if (this.capeSprite) {
+      this.capeSprite.destroy();
+      this.capeSprite = undefined;
+    }
 
+    this.player.clearTint();
     this.player.setTint(0xff0000);
     this.player.setVelocityX(0);
     this.player.setVelocityY(-400);

@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { createTextures } from "../textures";
 import { generateCastleLevel, type CastleLevelData } from "../level";
+import { playCoin, playJump } from "../sounds";
 
 const TILE = 32;
 const PLAYER_SPEED = 220;
@@ -186,6 +187,7 @@ export class CastleScene extends Phaser.Scene {
 
     if (jump && onGround) {
       this.player.setVelocityY(JUMP_VELOCITY);
+      playJump();
     }
 
     if (!onGround) {
@@ -468,6 +470,7 @@ export class CastleScene extends Phaser.Scene {
     (coin as Phaser.Physics.Arcade.Sprite).destroy();
     this.score += 100;
     this.scoreText.setText(`Score: ${this.score}`);
+    playCoin();
   }
 
   private hitEnemy(

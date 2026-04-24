@@ -60,6 +60,85 @@ export function createTextures(scene: Phaser.Scene) {
   scene.textures.get("qblock").add(0, 0, 0, 0, 32, 32);
   scene.textures.get("qblock").add(1, 0, 32, 0, 32, 32);
 
+  // --- Feather (16x20) ---
+  const feather = scene.textures.createCanvas("feather", 16, 20)!;
+  const fthctx = feather.getContext();
+  // Teardrop shape
+  fthctx.fillStyle = "#ffd44a";
+  fthctx.beginPath();
+  fthctx.moveTo(8, 2);
+  fthctx.quadraticCurveTo(3, 9, 8, 18);
+  fthctx.quadraticCurveTo(13, 9, 8, 2);
+  fthctx.fill();
+  fthctx.strokeStyle = "#a87f00";
+  fthctx.lineWidth = 1;
+  fthctx.stroke();
+  // Spine
+  fthctx.beginPath();
+  fthctx.moveTo(8, 3);
+  fthctx.lineTo(8, 17);
+  fthctx.stroke();
+  // Barbs
+  fthctx.strokeStyle = "#ffb800";
+  for (let i = 0; i < 3; i++) {
+    const y = 7 + i * 3;
+    fthctx.beginPath();
+    fthctx.moveTo(8, y);
+    fthctx.lineTo(5, y + 2);
+    fthctx.moveTo(8, y);
+    fthctx.lineTo(11, y + 2);
+    fthctx.stroke();
+  }
+  feather.refresh();
+
+  // --- Cape (20x26) — worn by player while caped ---
+  const cape = scene.textures.createCanvas("cape", 20, 26)!;
+  const cpctx2 = cape.getContext();
+  // Main cape body - trapezoidal cloth
+  cpctx2.fillStyle = "#ffcc00";
+  cpctx2.beginPath();
+  cpctx2.moveTo(6, 0);
+  cpctx2.lineTo(14, 0);
+  cpctx2.lineTo(19, 26);
+  cpctx2.lineTo(1, 26);
+  cpctx2.closePath();
+  cpctx2.fill();
+  // Dark shading along the right/back edge
+  cpctx2.fillStyle = "#b38600";
+  cpctx2.beginPath();
+  cpctx2.moveTo(14, 0);
+  cpctx2.lineTo(19, 26);
+  cpctx2.lineTo(15, 26);
+  cpctx2.lineTo(11, 0);
+  cpctx2.closePath();
+  cpctx2.fill();
+  // Highlight stripe
+  cpctx2.fillStyle = "#ffe04a";
+  cpctx2.fillRect(6, 2, 2, 22);
+  // Scalloped bottom hem
+  cpctx2.fillStyle = "#996f00";
+  cpctx2.fillRect(1, 23, 18, 3);
+  // Neck/collar band
+  cpctx2.fillStyle = "#d99c00";
+  cpctx2.fillRect(6, 0, 8, 3);
+  cape.refresh();
+
+  // --- Used question block (32x32, dimmed empty block) ---
+  const qused = scene.textures.createCanvas("qblock-used", 32, 32)!;
+  const quctx = qused.getContext();
+  quctx.fillStyle = "#8a5a1f";
+  quctx.fillRect(0, 0, 32, 32);
+  quctx.strokeStyle = "#5a3a12";
+  quctx.lineWidth = 2;
+  quctx.strokeRect(1, 1, 30, 30);
+  // Recessed rivets at corners
+  quctx.fillStyle = "#5a3a12";
+  quctx.fillRect(4, 4, 3, 3);
+  quctx.fillRect(25, 4, 3, 3);
+  quctx.fillRect(4, 25, 3, 3);
+  quctx.fillRect(25, 25, 3, 3);
+  qused.refresh();
+
   // --- Player idle (32x32, 2 frames) ---
   const pidle = scene.textures.createCanvas("player-idle", 64, 32)!;
   const pictx = pidle.getContext();
@@ -186,6 +265,26 @@ export function createTextures(scene: Phaser.Scene) {
   ppctx.fillRect(40, 0, 4, 20);
   ppctx.fillRect(38, 16, 4, 48);
   pipe.refresh();
+
+  // --- Warp pipe (48x64) - same pipe, dark hole on top suggests it goes somewhere ---
+  const pipeWarp = scene.textures.createCanvas("pipe-warp", 48, 64)!;
+  const pwctx = pipeWarp.getContext();
+  pwctx.fillStyle = "#1ea31e";
+  pwctx.fillRect(6, 16, 36, 48);
+  pwctx.fillStyle = "#2ec42e";
+  pwctx.fillRect(0, 0, 48, 20);
+  pwctx.fillStyle = "#3edd3e";
+  pwctx.fillRect(4, 0, 6, 20);
+  pwctx.fillRect(10, 16, 4, 48);
+  pwctx.fillStyle = "#0e7a0e";
+  pwctx.fillRect(40, 0, 4, 20);
+  pwctx.fillRect(38, 16, 4, 48);
+  // Dark opening at top — the warp hole
+  pwctx.fillStyle = "#061806";
+  pwctx.fillRect(10, 4, 28, 10);
+  pwctx.fillStyle = "#000000";
+  pwctx.fillRect(12, 6, 24, 6);
+  pipeWarp.refresh();
 
   // --- Cloud (64x32) ---
   const cloud = scene.textures.createCanvas("cloud", 64, 32)!;

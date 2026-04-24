@@ -14,7 +14,7 @@ export interface LevelData {
   }[];
   coins: { x: number; y: number }[];
   enemies: { x: number; y: number; dir: "left" | "right" }[];
-  pipes: { x: number; y: number }[];
+  pipes: { x: number; y: number; canWarp: boolean }[];
   safePits: SafePit[];
   checkpoint: { x: number; y: number };
 }
@@ -141,7 +141,7 @@ export function generateLevel(widthInTiles: number): LevelData {
   for (const seg of ground) {
     if (seg.end - seg.start > 12 && Math.random() < 0.5) {
       const px = seg.start + randInt(4, seg.end - seg.start - 4);
-      pipes.push({ x: px, y: GROUND_Y });
+      pipes.push({ x: px, y: GROUND_Y, canWarp: Math.random() < 0.5 });
     }
   }
 
