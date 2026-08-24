@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>The Beginning of Crazy Animals</title>
+  <style>
+    html, body {
+      margin: 0;
+      height: 100%;
+      overflow: hidden;
+      background: #0b0f1e;
+      /* Stop pinch-zoom / scroll-bounce on mobile so taps only flap. */
+      touch-action: none;
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    /* Centering is handled by Phaser's Scale Manager (autoCenter: CENTER_BOTH).
+       Don't also center here, or the canvas gets double-offset. */
+    canvas {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <script type="module" src="./src/main.ts"></script>
+</body>
+</html>
