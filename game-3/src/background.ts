@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { BACKDROP_KEYS, BACKDROP_SIZE } from "./textures";
 
 interface Layer {
   stars: Phaser.GameObjects.Image[];
@@ -60,6 +61,81 @@ export class Starfield {
           star.y = Math.random() * h;
         }
       }
+    }
+  }
+}
+
+
+// Per-type framing. Distant objects are big and dim; a nebula spreads wider and
+// sits further back than a planet, which is a solid, closer thing.
+const BACKDROP_STYLE: Record<
+  (typeof BACKDROP_KEYS)[number],
+  { height: [number, number]; alpha: [number, number] }
+> = {
+  // Planet and black hole are solid objects — near-opaque, or stars show
+  // through the disc and the event horizon and they read as ghosts. The gas
+  // clouds stay translucent, which is what they should look like.
+  "bg-planet": { height: [0.45, 0.8], alpha: [0.82, 0.95] },
+  "bg-blackhole": { height: [0.4, 0.7], alpha: [0.85, 0.95] },
+  "bg-nebula": { height: [0.7, 1.15], alpha: [0.35, 0.5] },
+  "bg-galaxy": { height: [0.6, 1.0], alpha: [0.45, 0.62] },
+};
+
+/**
+ * One piece of far-away scenery — a ringed planet, a black hole, a nebula or a
+ * spiral galaxy — chosen at random and drifting slowly across the background.
+ * It sits behind the starfield and moves far slower than the slowest star
+ * layer, which is what sells the distance. When one leaves the screen a
+ * different one drifts in behind it.
+ */
+export class Backdrop {
+  private scene: Phaser.Scene;
+  private obj?: Phaser.GameObjects.Image;
+  private speed = 0;
+  private lastKey?: string;
+
+  constructor(scene: Phaser.Scene) {
+    this.scene = scene;
+    this.spawn(true);
+  }
+
+  private spawn(initial: boolean): void {
+    const w = this.scene.scale.width;
+    const h = this.scene.scale.height;
+
+    // Don't repeat the object that just drifted off.
+    const choices = BACKDROP_KEYS.filter((k) => k !== this.lastKey);
+    const key = Phaser.Utils.Array.GetRandom([...choices]);
+    this.lastKey = key;
+    const style = BACKDROP_STYLE[key];
+
+    const target = h * Phaser.Math.FloatBetween(style.height[0], style.height[1]);
+    const scale = target / BACKDROP_SIZE;
+    // On a first spawn it may already be partly on screen, so a run doesn't
+    // always open on empty space; later ones always enter from the right.
+    const x = initial
+      ? Phaser.Math.Between(Math.round(w * 0.25), Math.round(w * 1.1))
+      : w + (BACKDROP_SIZE * scale) / 2;
+
+    this.obj = this.scene.add
+      .image(x, Phaser.Math.Between(Math.round(h * 0.2), Math.round(h * 0.75)), key)
+      .setScale(scale)
+      .setAlpha(Phaser.Math.FloatBetween(style.alpha[0], style.alpha[1]))
+      .setAngle(Phaser.Math.Between(-12, 12))
+      .setScrollFactor(0)
+      .setDepth(-20); // behind every star layer
+
+    // Slower than the slowest stars — parallax reads as "very far away".
+    this.speed = Phaser.Math.FloatBetween(5, 11);
+  }
+
+  update(delta: number): void {
+    if (!this.obj) return;
+    this.obj.x -= this.speed * (delta / 1000);
+    if (this.obj.x < -this.obj.displayWidth / 2) {
+      this.obj.destroy();
+      this.obj = undefined;
+      this.spawn(false);
     }
   }
 }

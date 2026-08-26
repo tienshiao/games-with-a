@@ -6,9 +6,10 @@ import {
   ASTEROID_SIZE,
   ASTEROID_RADII,
   ASTEROID_VARIANTS,
+  QBLOCK_SIZE,
 } from "../textures";
-import { Starfield } from "../background";
-import { playFlap, playScore, playCrash } from "../sounds";
+import { Starfield, Backdrop } from "../background";
+import { playFlap, playScore, playCrash, playPowerUp, playLevelClear } from "../sounds";
 
 const ROCKET_X = 120;
 const FLAP_VELOCITY = -390;
@@ -22,6 +23,11 @@ const SPEED_MAX = 265;
 const SPAWN_BASE = 1750;
 const SPAWN_MIN = 1200;
 const EDGE_MARGIN = 90; // keep gaps away from very top/bottom
+// The wall that carries the "?" block. Counted by fields spawned, so the block
+// rides in with the 20th wall the player meets.
+const ITEM_WALL = 20;
+// Clearing this many barriers finishes level 1 and opens the maze.
+const LEVEL_CLEAR_SCORE = 50;
 
 // One spawn: a cluster of rocks above the gap and another below it. The rocks
 // drift left with the field but are otherwise static — no spin, no bobbing.
@@ -32,17 +38,24 @@ interface AsteroidField {
 
 export class GameScene extends Phaser.Scene {
   private starfield!: Starfield;
+  private backdrop!: Backdrop;
   private rocket!: Phaser.Physics.Arcade.Image;
   private asteroids!: Phaser.Physics.Arcade.Group;
+  private blocks!: Phaser.Physics.Arcade.Group;
   private fields: AsteroidField[] = [];
+  private itemSlot!: Phaser.GameObjects.Image;
+  private slotItem?: Phaser.GameObjects.Image;
   private thruster!: Phaser.GameObjects.Particles.ParticleEmitter;
   private scoreText!: Phaser.GameObjects.Text;
   private readyText?: Phaser.GameObjects.Text;
   private spawnEvent?: Phaser.Time.TimerEvent;
 
   private score = 0;
+  private fieldsSpawned = 0;
+  private hasSword = false;
   private started = false;
   private gameOver = false;
+  private cleared = false;
 
   constructor() {
     super({ key: "GameScene" });
@@ -52,13 +65,23 @@ export class GameScene extends Phaser.Scene {
     // Reset per-run state (scenes are reused across restarts)
     this.fields = [];
     this.score = 0;
+    this.fieldsSpawned = 0;
+    this.hasSword = false;
+    this.slotItem = undefined;
     this.started = false;
     this.gameOver = false;
+    this.cleared = false;
 
     createTextures(this);
+    // Scenery first: the backdrop sits behind the stars.
+    this.backdrop = new Backdrop(this);
     this.starfield = new Starfield(this, 60);
 
     this.asteroids = this.physics.add.group({
+      allowGravity: false,
+      immovable: true,
+    });
+    this.blocks = this.physics.add.group({
       allowGravity: false,
       immovable: true,
     });
@@ -87,6 +110,9 @@ export class GameScene extends Phaser.Scene {
       .setDepth(4);
 
     this.physics.add.overlap(this.rocket, this.asteroids, () => this.die());
+    this.physics.add.overlap(this.rocket, this.blocks, (_rocket, block) =>
+      this.collectItem(block as Phaser.Physics.Arcade.Image)
+    );
 
     // Score UI
     this.scoreText = this.add
@@ -100,6 +126,9 @@ export class GameScene extends Phaser.Scene {
       })
       .setOrigin(0.5)
       .setDepth(20);
+
+    // Item slot sits empty at the bottom until something lands in it.
+    this.itemSlot = this.add.image(0, 0, "item-slot").setDepth(20).setAlpha(0.45);
 
     this.readyText = this.add
       .text(0, 0, "TAP TO FLY", {
@@ -141,10 +170,15 @@ export class GameScene extends Phaser.Scene {
     const h = this.scale.height;
     this.scoreText.setPosition(w / 2, Math.min(70, h * 0.1));
     this.readyText?.setPosition(w / 2, h / 2 + 90);
+    this.itemSlot.setPosition(w / 2, h - 66);
+    // Leave the item alone mid-flight — the pickup tween owns its position.
+    if (this.slotItem && !this.tweens.isTweening(this.slotItem)) {
+      this.slotItem.setPosition(this.itemSlot.x, this.itemSlot.y);
+    }
   }
 
   private flap(): void {
-    if (this.gameOver) return;
+    if (this.gameOver || this.cleared) return;
     if (!this.started) this.startRun();
 
     (this.rocket.body as Phaser.Physics.Arcade.Body).setVelocityY(FLAP_VELOCITY);
@@ -228,12 +262,83 @@ export class GameScene extends Phaser.Scene {
     stack(gapTop, -1);
     stack(gapBottom, 1);
 
+    this.fieldsSpawned++;
+    if (this.fieldsSpawned === ITEM_WALL) this.spawnQuestionBlock(x, gapCenter, speed);
+
     if (rocks.length) this.fields.push({ rocks, scored: false });
+  }
+
+  // Rides in the middle of the item wall's gap, so reaching it is the reward
+  // for threading that wall rather than a separate obstacle.
+  private spawnQuestionBlock(x: number, y: number, speed: number): void {
+    const block = this.blocks.create(x, y, "qblock") as Phaser.Physics.Arcade.Image;
+    block.setDepth(2);
+    block.setVelocityX(-speed);
+    const body = block.body as Phaser.Physics.Arcade.Body;
+    body.setAllowGravity(false);
+    body.setSize(QBLOCK_SIZE * 0.9, QBLOCK_SIZE * 0.9);
+    body.updateFromGameObject(); // setSize only moves the offset, not the body
+
+    // Gentle shimmer so it reads as something to hit, not scenery. Alpha, not
+    // scale — scaling the sprite would drag its hitbox out of alignment.
+    this.tweens.add({
+      targets: block,
+      alpha: 0.72,
+      duration: 620,
+      yoyo: true,
+      repeat: -1,
+      ease: "Sine.easeInOut",
+    });
+  }
+
+  private collectItem(block: Phaser.Physics.Arcade.Image): void {
+    if (this.gameOver || this.hasSword || this.cleared) return;
+    this.hasSword = true;
+
+    const x = block.x;
+    const y = block.y;
+    this.tweens.killTweensOf(block);
+    block.destroy();
+    playPowerUp();
+
+    const pop = this.add
+      .particles(x, y, "spark", {
+        speed: { min: 60, max: 200 },
+        scale: { start: 0.9, end: 0 },
+        alpha: { start: 1, end: 0 },
+        lifespan: 420,
+        blendMode: "ADD",
+        emitting: false,
+      })
+      .setDepth(9);
+    pop.explode(20);
+
+    // The sword flies from the block into the slot
+    const sword = this.add.image(x, y, "sword").setDepth(21).setScale(1.4);
+    this.slotItem = sword;
+    this.itemSlot.setAlpha(1);
+    this.tweens.add({
+      targets: sword,
+      x: this.itemSlot.x,
+      y: this.itemSlot.y,
+      scale: 1,
+      duration: 480,
+      ease: "Cubic.easeInOut",
+    });
+    this.tweens.add({
+      targets: this.itemSlot,
+      scale: 1.25,
+      duration: 160,
+      delay: 470,
+      yoyo: true,
+      ease: "Back.easeOut",
+    });
   }
 
   override update(_time: number, delta: number): void {
     this.starfield.update(delta);
-    if (!this.started || this.gameOver) return;
+    this.backdrop.update(delta);
+    if (!this.started || this.gameOver || this.cleared) return;
 
     // Tilt: nose up when rising, dive down when falling
     const vy = (this.rocket.body as Phaser.Physics.Arcade.Body).velocity.y;
@@ -248,8 +353,17 @@ export class GameScene extends Phaser.Scene {
         this.scoreText.setText(String(this.score));
         playScore();
         this.bumpScore();
+        if (this.score >= LEVEL_CLEAR_SCORE) {
+          this.clearLevel();
+          return;
+        }
       }
     }
+    // An uncollected block scrolls away with its wall
+    for (const block of this.blocks.getChildren() as Phaser.Physics.Arcade.Image[]) {
+      if (block.x < -QBLOCK_SIZE) block.destroy();
+    }
+
     this.fields = this.fields.filter((field) => {
       if (field.rocks.every((rock) => rock.x < -ASTEROID_SIZE)) {
         field.rocks.forEach((rock) => rock.destroy());
@@ -274,8 +388,60 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
+  // Level 1 is over: stop the field, fly the rocket out to the right, and hand
+  // the score on to the maze. Nothing can kill the player during the flyout.
+  private clearLevel(): void {
+    if (this.cleared) return;
+    this.cleared = true;
+    playLevelClear();
+
+    this.spawnEvent?.remove();
+    const body = this.rocket.body as Phaser.Physics.Arcade.Body;
+    body.setAllowGravity(false);
+    body.setVelocity(0, 0);
+    body.enable = false; // no more collisions while it exits
+
+    const banner = this.add
+      .text(this.scale.width / 2, this.scale.height / 2 - 40, "LEVEL 1 CLEAR!", {
+        fontSize: "44px",
+        fontFamily: "monospace",
+        fontStyle: "bold",
+        color: "#5dff8f",
+        stroke: "#000000",
+        strokeThickness: 7,
+      })
+      .setOrigin(0.5)
+      .setDepth(25)
+      .setScale(0.4);
+    this.tweens.add({ targets: banner, scale: 1, duration: 400, ease: "Back.easeOut" });
+
+    this.tweens.add({
+      targets: this.rocket,
+      angle: 0,
+      y: this.scale.height / 2,
+      duration: 500,
+      ease: "Sine.easeInOut",
+      onComplete: () => {
+        this.tweens.add({
+          targets: this.rocket,
+          x: this.scale.width + ROCKET_W * 2,
+          duration: 900,
+          delay: 350,
+          ease: "Cubic.easeIn",
+        });
+      },
+    });
+
+    this.time.delayedCall(2100, () => {
+      this.cameras.main.fadeOut(350, 0, 0, 0);
+      this.time.delayedCall(380, () => {
+        this.scene.start("MazeScene", { score: this.score });
+      });
+    });
+  }
+
   private die(): void {
-    if (this.gameOver) return;
+    if (this.gameOver || this.cleared) return;
     this.gameOver = true;
     playCrash();
 

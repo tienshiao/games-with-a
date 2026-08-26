@@ -6,6 +6,8 @@ import { playClick } from "../sounds";
 
 interface GameOverData {
   score?: number;
+  /** Set when the player finished the maze rather than crashing. */
+  cleared?: boolean;
 }
 
 export class GameOverScene extends Phaser.Scene {
@@ -22,6 +24,7 @@ export class GameOverScene extends Phaser.Scene {
     this.items = [];
 
     const score = data?.score ?? 0;
+    const cleared = data?.cleared ?? false;
     const prevBest = getHighScore();
     const best = submitScore(score);
     const isNewBest = score > prevBest && score > 0;
@@ -37,11 +40,11 @@ export class GameOverScene extends Phaser.Scene {
       return obj;
     };
 
-    add(0.25, "GAME OVER", {
-      fontSize: "56px",
+    add(0.25, cleared ? "YOU ESCAPED!" : "GAME OVER", {
+      fontSize: cleared ? "48px" : "56px",
       fontFamily: "monospace",
       fontStyle: "bold",
-      color: "#ff5a3c",
+      color: cleared ? "#5dff8f" : "#ff5a3c",
       stroke: "#000000",
       strokeThickness: 8,
     });
@@ -80,7 +83,7 @@ export class GameOverScene extends Phaser.Scene {
       });
     }
 
-    const retry = add(0.7, "TAP TO RETRY", {
+    const retry = add(0.7, cleared ? "TAP TO PLAY AGAIN" : "TAP TO RETRY", {
       fontSize: "30px",
       fontFamily: "monospace",
       fontStyle: "bold",
