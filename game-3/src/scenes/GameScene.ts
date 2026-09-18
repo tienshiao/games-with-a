@@ -27,7 +27,7 @@ const EDGE_MARGIN = 90; // keep gaps away from very top/bottom
 // rides in with the 20th wall the player meets.
 const ITEM_WALL = 20;
 // Clearing this many barriers finishes level 1 and opens the maze.
-const LEVEL_CLEAR_SCORE = 50;
+const LEVEL_CLEAR_SCORE = 21;
 
 // One spawn: a cluster of rocks above the gap and another below it. The rocks
 // drift left with the field but are otherwise static — no spin, no bobbing.

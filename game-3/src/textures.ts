@@ -16,7 +16,13 @@ export const QBLOCK_SIZE = 46;
 // CELL wide and the whole maze can be drawn by stamping this texture.
 export const CELL = 64;
 export const CRYSTAL_SIZE = 30;
+// The level 3 goal crystal, drawn at its own size rather than scaled up from
+// CRYSTAL_SIZE so the facets and highlight stay crisp.
+export const GOAL_CRYSTAL_SIZE = 132;
 export const PORTAL_SIZE = 72;
+// The player in levels 2 and 3, ported from game 2: a striped triangle on stick legs.
+export const HERO_SIZE = 40;
+export const HERO_WALK_FRAMES = 4;
 // Distant scenery for level 1. Drawn big and scaled down per spawn, so the
 // same texture reads well on a phone and on a desktop window.
 export const BACKDROP_SIZE = 640;
@@ -40,6 +46,8 @@ export function createTextures(scene: Phaser.Scene) {
   createBackdrops(scene);
   createMazeWall(scene);
   createCrystal(scene);
+  createGoalCrystal(scene);
+  createHero(scene);
   createPortal(scene);
   createFlame(scene);
   createSpark(scene);
@@ -341,9 +349,9 @@ function backdropCanvas(scene: Phaser.Scene, key: string) {
   return { cv, c: cv.getContext(), n: BACKDROP_SIZE };
 }
 
-// Gas giant with a tilted ring system: the ring is stroked once behind the
-// planet and again in front, clipped to the lower half, so it reads as a band
-// passing around the sphere.
+// Teal-and-violet gas giant with a tilted icy ring system: the ring is stroked
+// once behind the planet and again in front, clipped to the lower half, so it
+// reads as a band passing around the sphere.
 function createRingedPlanet(scene: Phaser.Scene): void {
   const { cv, c, n } = backdropCanvas(scene, "bg-planet");
   const cx = n / 2;
@@ -359,7 +367,7 @@ function createRingedPlanet(scene: Phaser.Scene): void {
       const rr = R * (1.35 + i * 0.09);
       c.beginPath();
       c.ellipse(0, 0, rr, rr * 0.3, 0, 0, Math.PI * 2);
-      c.strokeStyle = `rgba(${210 - i * 8},${180 - i * 6},${140 + i * 5},${
+      c.strokeStyle = `rgba(${150 - i * 6},${200 - i * 4},${235 - i * 3},${
         0.5 - i * 0.045
       })`;
       c.lineWidth = i === 3 ? 2 : 5;
@@ -372,10 +380,10 @@ function createRingedPlanet(scene: Phaser.Scene): void {
 
   // Planet body: lit from the upper left, banded, with a dark limb.
   const grad = c.createRadialGradient(cx - R * 0.4, cy - R * 0.45, R * 0.1, cx, cy, R);
-  grad.addColorStop(0, "#f5cf94");
-  grad.addColorStop(0.5, "#d08f4e");
-  grad.addColorStop(0.85, "#8a4f28");
-  grad.addColorStop(1, "#3c2114");
+  grad.addColorStop(0, "#9ff0e0");
+  grad.addColorStop(0.5, "#3fa3a8");
+  grad.addColorStop(0.85, "#3a4f9a");
+  grad.addColorStop(1, "#161a44");
   c.fillStyle = grad;
   c.beginPath();
   c.arc(cx, cy, R, 0, Math.PI * 2);
@@ -388,7 +396,7 @@ function createRingedPlanet(scene: Phaser.Scene): void {
   c.clip();
   for (let i = 0; i < 9; i++) {
     const y = cy - R + (i + rnd() * 0.6) * (R / 4.5);
-    c.fillStyle = `rgba(${60 + rnd() * 40},${30 + rnd() * 30},${20 + rnd() * 20},${
+    c.fillStyle = `rgba(${20 + rnd() * 30},${45 + rnd() * 35},${85 + rnd() * 40},${
       0.08 + rnd() * 0.12
     })`;
     c.beginPath();
@@ -676,49 +684,77 @@ function createMazeWall(scene: Phaser.Scene): void {
 
 // The pickup scattered through the maze: a cut gem with a bright core.
 function createCrystal(scene: Phaser.Scene): void {
-  const n = CRYSTAL_SIZE;
-  const cv = scene.textures.createCanvas("crystal", n, n)!;
+  const cv = scene.textures.createCanvas("crystal", CRYSTAL_SIZE, CRYSTAL_SIZE)!;
+  drawCrystal(cv.getContext(), CRYSTAL_SIZE);
+  cv.refresh();
+}
+
+// Same gem, drawn big and sitting in its own glow — the level 3 goal.
+function createGoalCrystal(scene: Phaser.Scene): void {
+  const n = GOAL_CRYSTAL_SIZE;
+  const cv = scene.textures.createCanvas("crystal-goal", n, n)!;
   const c = cv.getContext();
   const cx = n / 2;
 
-  // Six-sided gem silhouette
+  const glow = c.createRadialGradient(cx, cx, n * 0.12, cx, cx, cx);
+  glow.addColorStop(0, "rgba(150,255,245,0.5)");
+  glow.addColorStop(0.55, "rgba(56,214,255,0.16)");
+  glow.addColorStop(1, "rgba(26,111,208,0)");
+  c.fillStyle = glow;
+  c.fillRect(0, 0, n, n);
+
+  // The gem itself fills the middle ~62%, leaving the rest to the halo.
+  const gem = n * 0.62;
+  c.save();
+  c.translate((n - gem) / 2, (n - gem) / 2);
+  drawCrystal(c, gem);
+  c.restore();
+
+  cv.refresh();
+}
+
+// Six-sided gem, centred in a box of `n` pixels. All the offsets are scaled off
+// a 30px reference so the shape reads the same tiny in the maze and huge as the
+// level 3 goal.
+function drawCrystal(c: CanvasRenderingContext2D, n: number): void {
+  const cx = n / 2;
+  const u = n / 30;
+
   const body = c.createLinearGradient(0, 0, n, n);
   body.addColorStop(0, "#b6fff2");
   body.addColorStop(0.5, "#38d6ff");
   body.addColorStop(1, "#1a6fd0");
   c.fillStyle = body;
   c.beginPath();
-  c.moveTo(cx, 1);
-  c.lineTo(n - 3, n * 0.36);
-  c.lineTo(n - 7, n - 3);
-  c.lineTo(7, n - 3);
-  c.lineTo(3, n * 0.36);
+  c.moveTo(cx, u);
+  c.lineTo(n - 3 * u, n * 0.36);
+  c.lineTo(n - 7 * u, n - 3 * u);
+  c.lineTo(7 * u, n - 3 * u);
+  c.lineTo(3 * u, n * 0.36);
   c.closePath();
   c.fill();
   c.strokeStyle = "rgba(8,40,80,0.8)";
-  c.lineWidth = 1.5;
+  c.lineWidth = 1.5 * u;
   c.stroke();
 
   // Facets
   c.strokeStyle = "rgba(255,255,255,0.55)";
-  c.lineWidth = 1;
+  c.lineWidth = 1 * u;
   c.beginPath();
-  c.moveTo(cx, 1);
-  c.lineTo(cx, n - 3);
-  c.moveTo(3, n * 0.36);
-  c.lineTo(n - 3, n * 0.36);
+  c.moveTo(cx, u);
+  c.lineTo(cx, n - 3 * u);
+  c.moveTo(3 * u, n * 0.36);
+  c.lineTo(n - 3 * u, n * 0.36);
   c.stroke();
 
   // Highlight
   c.fillStyle = "rgba(255,255,255,0.75)";
   c.beginPath();
-  c.moveTo(cx - 1, 4);
-  c.lineTo(cx - 6, n * 0.36);
-  c.lineTo(cx - 1, n * 0.36);
+  c.moveTo(cx - u, 4 * u);
+  c.lineTo(cx - 6 * u, n * 0.36);
+  c.lineTo(cx - u, n * 0.36);
   c.closePath();
   c.fill();
-
-  cv.refresh();
 }
 
 // The maze exit: a glowing ring gate. Drawn bright; the scene tints it dark
@@ -760,6 +796,164 @@ function createPortal(scene: Phaser.Scene): void {
   c.fill();
 
   cv.refresh();
+}
+
+// --- Hero --------------------------------------------------------------
+// The striped triangle from game 2. Same construction — yellow body, orange
+// bars, stick legs, one big eye — redrawn on a 40px cell (game 2 used 32) so
+// the top spines and the legs fit inside the frame instead of clipping.
+//
+// Registered as a HERO_WALK_FRAMES-frame strip; frame 0 doubles as the idle
+// pose. The hero always faces right, so the scene flips it to walk left.
+// The "hero-walk" animation is registered here too — animations are global,
+// so the maze and the crystal level share it.
+function createHero(scene: Phaser.Scene): void {
+  const n = HERO_SIZE;
+  const cv = scene.textures.createCanvas("hero", n * HERO_WALK_FRAMES, n)!;
+  const c = cv.getContext();
+  for (let f = 0; f < HERO_WALK_FRAMES; f++) drawHero(c, f * n, f);
+  cv.refresh();
+
+  const tex = scene.textures.get("hero");
+  for (let f = 0; f < HERO_WALK_FRAMES; f++) tex.add(f, 0, f * n, 0, n, n);
+
+  if (scene.anims.exists("hero-walk")) return;
+  scene.anims.create({
+    key: "hero-walk",
+    frames: scene.anims.generateFrameNumbers("hero", {
+      start: 0,
+      end: HERO_WALK_FRAMES - 1,
+    }),
+    frameRate: 10,
+    repeat: -1,
+  });
+}
+
+// The triangle itself, inside the HERO_SIZE cell — the spines and legs stick
+// out past it. Exported so the scene's hitbox follows the drawing.
+export const HERO_BODY = { x: 7, y: 12, w: 28, h: 18 } as const;
+
+const HERO_LEFT_X = HERO_BODY.x;
+const HERO_RIGHT_X = HERO_BODY.x + HERO_BODY.w;
+const HERO_TOP_Y = HERO_BODY.y;
+const HERO_BOT_Y = HERO_BODY.y + HERO_BODY.h;
+
+function drawHero(c: CanvasRenderingContext2D, ox: number, frame: number): void {
+  drawHeroSpines(c, ox);
+  drawHeroBody(c, ox);
+  drawHeroFace(c, ox);
+  drawHeroLegs(c, ox, frame);
+}
+
+// Triangle pointing right: tall left edge, single point on the right.
+function drawHeroBody(c: CanvasRenderingContext2D, ox: number): void {
+  const leftX = ox + HERO_LEFT_X;
+  const rightX = ox + HERO_RIGHT_X;
+  const midY = (HERO_TOP_Y + HERO_BOT_Y) / 2;
+
+  c.fillStyle = "#f0e020";
+  c.beginPath();
+  c.moveTo(leftX, HERO_TOP_Y);
+  c.lineTo(rightX, midY);
+  c.lineTo(leftX, HERO_BOT_Y);
+  c.closePath();
+  c.fill();
+
+  // Vertical bars, each cut to the height of the triangle at that x.
+  c.fillStyle = "#e06000";
+  const stripes = 5;
+  for (let i = 0; i < stripes; i++) {
+    const t = (i + 0.5) / stripes;
+    const x = leftX + t * (rightX - leftX - 4);
+    const halfH = ((1 - t) * (HERO_BOT_Y - HERO_TOP_Y)) / 2;
+    const h = halfH * 1.2;
+    if (h > 2) c.fillRect(x - 1, midY - halfH * 0.6 + 1, 3, h - 2);
+  }
+
+  c.strokeStyle = "#000000";
+  c.lineWidth = 1.5;
+  c.beginPath();
+  c.moveTo(leftX, HERO_TOP_Y);
+  c.lineTo(rightX, midY);
+  c.lineTo(leftX, HERO_BOT_Y);
+  c.closePath();
+  c.stroke();
+}
+
+// Bristles along the top edge, angling up and to the right. Seeded so every
+// run draws the same hero (game 2 used Math.random here).
+function drawHeroSpines(c: CanvasRenderingContext2D, ox: number): void {
+  const leftX = ox + HERO_LEFT_X;
+  const rightX = ox + HERO_RIGHT_X;
+  const midY = (HERO_TOP_Y + HERO_BOT_Y) / 2;
+  const rnd = seeded(7717);
+
+  c.strokeStyle = "#222222";
+  c.lineWidth = 1.5;
+  const count = 6;
+  for (let i = 0; i < count; i++) {
+    const t = (i + 0.4) / (count + 0.5);
+    const baseX = leftX + t * (rightX - leftX);
+    const baseY = HERO_TOP_Y + t * (midY - HERO_TOP_Y);
+    c.beginPath();
+    c.moveTo(baseX, baseY);
+    c.lineTo(baseX + 2 + i * 0.5, baseY - 7 - rnd() * 3);
+    c.stroke();
+  }
+}
+
+// Stick legs under the bottom edge; alternating ones swing per frame.
+function drawHeroLegs(c: CanvasRenderingContext2D, ox: number, frame: number): void {
+  const leftX = ox + HERO_LEFT_X;
+  const rightX = ox + HERO_RIGHT_X;
+  const midY = (HERO_TOP_Y + HERO_BOT_Y) / 2;
+
+  c.strokeStyle = "#222222";
+  c.lineWidth = 1.5;
+  const count = 7;
+  for (let i = 0; i < count; i++) {
+    const t = (i + 0.3) / (count + 0.3);
+    const baseX = leftX + t * (rightX - leftX);
+    const baseY = HERO_BOT_Y + t * (midY - HERO_BOT_Y);
+    // Four frames of a two-beat gait: legs swing out, back, out the other way.
+    const swing = (i % 2 === 0 ? 1 : -1) * [0, 2.5, 0, -2.5][frame]!;
+    c.beginPath();
+    c.moveTo(baseX, baseY);
+    c.lineTo(baseX + swing, baseY + 5 + Math.abs(swing) * 0.5);
+    c.stroke();
+  }
+}
+
+// One big eye up front, with a smile under it.
+function drawHeroFace(c: CanvasRenderingContext2D, ox: number): void {
+  const midY = (HERO_TOP_Y + HERO_BOT_Y) / 2;
+  const eyeX = ox + 27;
+  const eyeY = midY - 1;
+  const eyeR = 3.5;
+
+  c.fillStyle = "#ffffff";
+  c.beginPath();
+  c.arc(eyeX, eyeY, eyeR, 0, Math.PI * 2);
+  c.fill();
+  c.strokeStyle = "#000000";
+  c.lineWidth = 1;
+  c.stroke();
+
+  c.fillStyle = "#000000";
+  c.beginPath();
+  c.arc(eyeX + 1, eyeY, 1.8, 0, Math.PI * 2);
+  c.fill();
+
+  c.fillStyle = "#ffffff";
+  c.beginPath();
+  c.arc(eyeX + 2, eyeY - 1.5, 1, 0, Math.PI * 2);
+  c.fill();
+
+  c.strokeStyle = "#000000";
+  c.lineWidth = 1.5;
+  c.beginPath();
+  c.arc(eyeX + 1, eyeY + 4, 3, 0.2, Math.PI - 0.2);
+  c.stroke();
 }
 
 function createFlame(scene: Phaser.Scene): void {

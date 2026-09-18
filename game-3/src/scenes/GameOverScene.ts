@@ -6,7 +6,7 @@ import { playClick } from "../sounds";
 
 interface GameOverData {
   score?: number;
-  /** Set when the player finished the maze rather than crashing. */
+  /** Set when the player reached the level 3 crystal rather than crashing. */
   cleared?: boolean;
 }
 
@@ -40,8 +40,8 @@ export class GameOverScene extends Phaser.Scene {
       return obj;
     };
 
-    add(0.25, cleared ? "YOU ESCAPED!" : "GAME OVER", {
-      fontSize: cleared ? "48px" : "56px",
+    add(0.25, cleared ? "CRYSTAL CLAIMED!" : "GAME OVER", {
+      fontSize: cleared ? "42px" : "56px",
       fontFamily: "monospace",
       fontStyle: "bold",
       color: cleared ? "#5dff8f" : "#ff5a3c",
