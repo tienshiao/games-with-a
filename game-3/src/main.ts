@@ -4,10 +4,13 @@ import { GameScene } from "./scenes/GameScene";
 import { MazeScene } from "./scenes/MazeScene";
 import { CrystalScene } from "./scenes/CrystalScene";
 import { GameOverScene } from "./scenes/GameOverScene";
+import { initWorld3D } from "./three/world3d";
 
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
-  backgroundColor: "#0b0f1e",
+  // Phaser draws only the HUD and effects now; the world is rendered by
+  // Three.js in a canvas underneath (see three/world3d.ts).
+  transparent: true,
   scale: {
     parent: "game",
     // RESIZE: the canvas (and game world) fills the parent/window exactly — no
@@ -29,6 +32,7 @@ const config: Phaser.Types.Core.GameConfig = {
 };
 
 const game = new Phaser.Game(config);
+initWorld3D(game, document.getElementById("game")!);
 
 // iOS/iPadOS report a layout viewport taller than what's actually on screen, so
 // a canvas sized to 100% height hangs off the bottom and anything anchored

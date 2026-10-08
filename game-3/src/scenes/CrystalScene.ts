@@ -6,6 +6,8 @@ import {
 } from "../textures";
 import { Starfield } from "../background";
 import { playScore, playLevelClear } from "../sounds";
+import { view3d } from "../three/world3d";
+import { crystalModel, glowModel, heroModel } from "../three/models";
 
 const HERO_SPEED = 210;
 const HERO_SCALE = 2;
@@ -51,7 +53,7 @@ export class CrystalScene extends Phaser.Scene {
     this.finished = false;
 
     createTextures(this);
-    this.cameras.main.setBackgroundColor("#0a0d20");
+    view3d(this).setBackground("#0a0d20");
     this.starfield = new Starfield(this, 14);
 
     this.placeCrystal();
@@ -81,6 +83,7 @@ export class CrystalScene extends Phaser.Scene {
       .setAlpha(0.28)
       .setBlendMode(Phaser.BlendModes.ADD)
       .setDepth(1);
+    view3d(this).bind(this.halo, glowModel(GOAL_CRYSTAL_SIZE), { z: -60 });
     this.tweens.add({
       targets: this.halo,
       scale: 2.2,
@@ -97,6 +100,7 @@ export class CrystalScene extends Phaser.Scene {
     // the hitbox hugs the gem rather than the whole square.
     const r = (GOAL_CRYSTAL_SIZE * 0.62) / 2;
     body.setCircle(r, GOAL_CRYSTAL_SIZE / 2 - r, GOAL_CRYSTAL_SIZE / 2 - r);
+    view3d(this).bind(this.crystal, crystalModel(GOAL_CRYSTAL_SIZE * 0.62));
 
     this.tweens.add({
       targets: this.crystal,
@@ -127,6 +131,7 @@ export class CrystalScene extends Phaser.Scene {
 
   private spawnHero(): void {
     this.hero = this.physics.add.sprite(0, 0, "hero", 0).setScale(HERO_SCALE).setDepth(5);
+    view3d(this).bind(this.hero, heroModel());
     const body = this.hero.body as Phaser.Physics.Arcade.Body;
     body.setAllowGravity(false);
     body.setCollideWorldBounds(true);

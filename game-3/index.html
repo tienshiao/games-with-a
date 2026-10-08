@@ -31,6 +31,16 @@
     canvas {
       display: block;
     }
+    /* Two canvases stacked in #game: Three.js draws the world underneath,
+       Phaser draws the HUD on top and takes all the input. */
+    #game canvas {
+      position: absolute;
+      left: 0;
+      top: 0;
+    }
+    #game canvas.world3d {
+      pointer-events: none;
+    }
     /* Measures env(safe-area-inset-bottom) so JS can keep the bottom HUD clear
        of the home indicator. Never visible. */
     #safe-area-probe {

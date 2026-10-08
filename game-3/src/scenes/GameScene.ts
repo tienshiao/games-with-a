@@ -9,6 +9,8 @@ import {
   QBLOCK_SIZE,
 } from "../textures";
 import { Starfield, Backdrop } from "../background";
+import { view3d } from "../three/world3d";
+import { asteroidModel, qblockModel, rocketModel } from "../three/models";
 import { playFlap, playScore, playCrash, playPowerUp, playLevelClear } from "../sounds";
 
 const ROCKET_X = 120;
@@ -93,6 +95,7 @@ export class GameScene extends Phaser.Scene {
     const body = this.rocket.body as Phaser.Physics.Arcade.Body;
     body.setSize(ROCKET_W * 0.72, ROCKET_H * 0.62); // forgiving hitbox, auto-centered
     body.setAllowGravity(false); // hovers until first flap
+    view3d(this).bind(this.rocket, rocketModel());
 
     // Thruster particles trailing behind the rocket
     this.thruster = this.add
@@ -244,6 +247,7 @@ export class GameScene extends Phaser.Scene {
       // setCircle only rewrites the offset — without this the body keeps the
       // position it had as a full-frame rectangle and sits up and to the left.
       body.updateFromGameObject();
+      view3d(this).bind(rock, asteroidModel(variant));
       rocks.push(rock);
     };
 
@@ -278,6 +282,7 @@ export class GameScene extends Phaser.Scene {
     body.setAllowGravity(false);
     body.setSize(QBLOCK_SIZE * 0.9, QBLOCK_SIZE * 0.9);
     body.updateFromGameObject(); // setSize only moves the offset, not the body
+    view3d(this).bind(block, qblockModel(this));
 
     // Gentle shimmer so it reads as something to hit, not scenery. Alpha, not
     // scale — scaling the sprite would drag its hitbox out of alignment.

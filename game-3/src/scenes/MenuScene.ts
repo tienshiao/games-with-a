@@ -1,6 +1,8 @@
 import Phaser from "phaser";
 import { createTextures } from "../textures";
 import { Starfield } from "../background";
+import { view3d } from "../three/world3d";
+import { rocketModel } from "../three/models";
 import { getHighScore } from "../storage";
 import { playClick } from "../sounds";
 
@@ -23,6 +25,7 @@ export class MenuScene extends Phaser.Scene {
     this.starfield = new Starfield(this);
 
     this.rocket = this.add.sprite(0, 0, "rocket").setScale(2.4);
+    view3d(this).bind(this.rocket, rocketModel({ spin: true }));
 
     this.title = this.add
       .text(0, 0, "The Beginning of\nCrazy Animals", {

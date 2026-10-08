@@ -8,6 +8,8 @@ import {
 } from "../textures";
 import { generateMaze, cellToTile, type Maze } from "../maze";
 import { playScore, playCrash, playPowerUp, playLevelClear } from "../sounds";
+import { view3d } from "../three/world3d";
+import { crystalModel, heroModel, mazeModel, portalModel } from "../three/models";
 
 const CELL_COLS = 7;
 const CELL_ROWS = 5;
@@ -60,7 +62,7 @@ export class MazeScene extends Phaser.Scene {
     this.finished = false;
 
     createTextures(this);
-    this.cameras.main.setBackgroundColor("#070a16");
+    view3d(this).setBackground("#070a16");
 
     this.maze = generateMaze(CELL_COLS, CELL_ROWS);
     const worldW = this.maze.cols * CELL;
@@ -88,6 +90,7 @@ export class MazeScene extends Phaser.Scene {
 
   // ---- world -------------------------------------------------------------
 
+  // The wall tiles are only collision now; the 3D maze draws them all at once.
   private buildWalls(): void {
     this.walls = this.physics.add.staticGroup();
     for (let ty = 0; ty < this.maze.rows; ty++) {
@@ -98,6 +101,8 @@ export class MazeScene extends Phaser.Scene {
           .setDepth(1);
       }
     }
+    this.cameras.main.ignore(this.walls);
+    view3d(this).add(mazeModel(this.maze));
   }
 
   private placeCrystals(): void {
@@ -136,6 +141,7 @@ export class MazeScene extends Phaser.Scene {
       ) as Phaser.Physics.Arcade.Image;
       gem.setDepth(3);
       (gem.body as Phaser.Physics.Arcade.StaticBody).setCircle(CRYSTAL_SIZE / 2);
+      view3d(this).bind(gem, crystalModel(CRYSTAL_SIZE));
       // The bob is cosmetic — a static body ignores it, which is what we want:
       // the pickup area stays centred on the cell.
       this.tweens.add({
@@ -157,6 +163,7 @@ export class MazeScene extends Phaser.Scene {
     const body = this.portal.body as Phaser.Physics.Arcade.StaticBody;
     body.setCircle(PORTAL_SIZE * 0.3, PORTAL_SIZE * 0.2, PORTAL_SIZE * 0.2);
     body.updateFromGameObject();
+    view3d(this).bind(this.portal, portalModel(this));
     // Locked look: red-shifted and slightly dimmed. Still bright enough to
     // spot from down a corridor — it's the landmark you're navigating toward.
     this.portal.setTint(0xff5a7a).setAlpha(0.8);
@@ -175,6 +182,7 @@ export class MazeScene extends Phaser.Scene {
       .sprite(tx * CELL + CELL / 2, ty * CELL + CELL / 2, "hero", 0)
       .setScale(HERO_SCALE)
       .setDepth(5);
+    view3d(this).bind(this.hero, heroModel());
     const body = this.hero.body as Phaser.Physics.Arcade.Body;
     body.setAllowGravity(false);
     body.setCollideWorldBounds(true);

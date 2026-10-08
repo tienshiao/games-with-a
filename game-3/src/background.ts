@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { BACKDROP_KEYS, BACKDROP_SIZE } from "./textures";
+import { view3d } from "./three/world3d";
 
 interface Layer {
   stars: Phaser.GameObjects.Image[];
@@ -41,6 +42,7 @@ export class Starfield {
           .setAlpha(spec.alpha * (0.5 + rnd() * 0.5))
           .setScrollFactor(0)
           .setDepth(-10);
+        view3d(scene).bindFlat(star);
         stars.push(star);
       }
       this.layers.push({ stars, speed: spec.speed });
@@ -124,6 +126,7 @@ export class Backdrop {
       .setAngle(Phaser.Math.Between(-12, 12))
       .setScrollFactor(0)
       .setDepth(-20); // behind every star layer
+    view3d(this.scene).bindFlat(this.obj);
 
     // Slower than the slowest stars — parallax reads as "very far away".
     this.speed = Phaser.Math.FloatBetween(5, 11);
