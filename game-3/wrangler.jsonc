@@ -1,0 +1,12 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "crazyanimals",
+  "compatibility_date": "2026-10-10",
+  // No Worker script: Cloudflare serves the Vite build straight from dist.
+  "assets": {
+    "directory": "./dist"
+  },
+  "routes": [
+    { "pattern": "crazyanimals.app", "custom_domain": true }
+  ]
+}

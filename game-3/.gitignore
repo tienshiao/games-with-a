@@ -24,6 +24,7 @@ _.log
 # caches
 .eslintcache
 .cache
+.wrangler
 *.tsbuildinfo
 
 # IntelliJ based IDEs
