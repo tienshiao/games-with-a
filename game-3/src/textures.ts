@@ -33,6 +33,7 @@ export const BACKDROP_KEYS = [
   "bg-galaxy",
 ] as const;
 export const SWORD_SIZE = 40;
+export const BOOST_SIZE = 40;
 export const SLOT_SIZE = 62;
 
 export function createTextures(scene: Phaser.Scene) {
@@ -42,6 +43,7 @@ export function createTextures(scene: Phaser.Scene) {
   createAsteroids(scene);
   createQuestionBlock(scene);
   createSword(scene);
+  createBoost(scene);
   createItemSlot(scene);
   createBackdrops(scene);
   createMazeWall(scene);
@@ -293,6 +295,49 @@ function createSword(scene: Phaser.Scene): void {
   c.beginPath();
   c.arc(cx, n * 0.6 + 5 + n * 0.22 + 2, 3.5, 0, Math.PI * 2);
   c.fill();
+
+  cv.refresh();
+}
+
+// The magma level's reward: a power boost, drawn as a lightning bolt and sized
+// like the sword so it sits in the same slot.
+function createBoost(scene: Phaser.Scene): void {
+  const n = BOOST_SIZE;
+  const cv = scene.textures.createCanvas("boost", n, n)!;
+  const c = cv.getContext();
+  const u = n / 40;
+
+  const bolt = () => {
+    c.beginPath();
+    c.moveTo(25 * u, 2 * u);
+    c.lineTo(8 * u, 22 * u);
+    c.lineTo(18 * u, 22 * u);
+    c.lineTo(14 * u, 38 * u);
+    c.lineTo(32 * u, 16 * u);
+    c.lineTo(22 * u, 16 * u);
+    c.closePath();
+  };
+
+  // Hot at the top, cooling to orange at the tip
+  const grad = c.createLinearGradient(0, 0, 0, n);
+  grad.addColorStop(0, "#fffbd0");
+  grad.addColorStop(0.45, "#ffe23a");
+  grad.addColorStop(1, "#ff9a1a");
+  c.fillStyle = grad;
+  c.strokeStyle = "#8a3c06";
+  c.lineWidth = 2.5;
+  c.lineJoin = "round";
+  bolt();
+  c.stroke();
+  c.fill();
+
+  // A sliver of highlight down the leading edge
+  c.strokeStyle = "rgba(255,255,255,0.75)";
+  c.lineWidth = 1.2;
+  c.beginPath();
+  c.moveTo(23 * u, 6 * u);
+  c.lineTo(12 * u, 20 * u);
+  c.stroke();
 
   cv.refresh();
 }

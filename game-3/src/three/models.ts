@@ -191,9 +191,11 @@ function buildAsteroid(variant: number): THREE.BufferGeometry {
 
 // --- "?" block -------------------------------------------------------------
 // A gold cube with the old painted face as a decal on the front. It rocks
-// gently side to side so the cube reads as solid.
+// gently side to side so the cube reads as solid — or, with `spin`, turns all
+// the way round, for a level where the camera can get to any side of it. That
+// one wears the face on its top and all four sides.
 
-export function qblockModel(scene: Phaser.Scene): THREE.Group {
+export function qblockModel(scene: Phaser.Scene, opts: { spin?: boolean } = {}): THREE.Group {
   const s = QBLOCK_SIZE - 4;
   const group = new THREE.Group();
   const cube = new THREE.Group();
@@ -205,23 +207,40 @@ export function qblockModel(scene: Phaser.Scene): THREE.Group {
       mat(0xf0a824, { roughness: 0.5, metalness: 0.3 })
     )
   );
-  const face = mesh(
-    geo("qblock-face", () => new THREE.PlaneGeometry(s, s)),
-    new THREE.MeshStandardMaterial({
-      map: canvasTexture(scene, "qblock"),
-      transparent: true,
-      roughness: 0.5,
-      metalness: 0.2,
-    })
-  );
-  face.position.z = s / 2 + 0.2;
-  cube.add(face);
+  const faceMat = new THREE.MeshStandardMaterial({
+    map: canvasTexture(scene, "qblock"),
+    transparent: true,
+    roughness: 0.5,
+    metalness: 0.2,
+  });
+  // Each face is the front one swung round to its side of the cube.
+  const turns: Array<[x: number, y: number]> = opts.spin
+    ? [
+        [0, 0],
+        [0, Math.PI / 2],
+        [0, Math.PI],
+        [0, -Math.PI / 2],
+        [-Math.PI / 2, 0],
+      ]
+    : [[0, 0]];
+  for (const [rx, ry] of turns) {
+    const side = new THREE.Group();
+    side.rotation.set(rx, ry, 0);
+    const face = mesh(geo("qblock-face", () => new THREE.PlaneGeometry(s, s)), faceMat);
+    face.position.z = s / 2 + 0.2;
+    side.add(face);
+    cube.add(side);
+  }
 
   let t = Math.random() * 10;
   hooks(group).sync = (dt) => {
     t += dt;
-    cube.rotation.y = Math.sin(t * 1.6) * 0.45;
-    cube.rotation.x = Math.sin(t * 1.1) * 0.15;
+    if (opts.spin) {
+      cube.rotation.y += dt * 1.1;
+    } else {
+      cube.rotation.y = Math.sin(t * 1.6) * 0.45;
+      cube.rotation.x = Math.sin(t * 1.1) * 0.15;
+    }
   };
   return group;
 }

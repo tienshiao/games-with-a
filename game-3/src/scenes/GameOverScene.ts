@@ -6,7 +6,7 @@ import { playClick } from "../sounds";
 
 interface GameOverData {
   score?: number;
-  /** Set when the player reached the level 4 portal rather than crashing. */
+  /** Set when the player reached the level 4 "?" block rather than crashing. */
   cleared?: boolean;
 }
 

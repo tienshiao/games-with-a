@@ -1,8 +1,8 @@
 import Phaser from "phaser";
 import * as THREE from "three";
-import { createTextures, CRYSTAL_SIZE, HERO_BODY, PORTAL_SIZE } from "../textures";
+import { createTextures, CRYSTAL_SIZE, HERO_BODY, QBLOCK_SIZE, SLOT_SIZE } from "../textures";
 import { generateMagma, isRock, MAGMA_TILE, type MagmaWorld } from "../magma";
-import { playScore, playCrash, playLevelClear } from "../sounds";
+import { playScore, playCrash, playPowerUp, playLevelClear } from "../sounds";
 import { DPad } from "../dpad";
 import { view3d } from "../three/world3d";
 import {
@@ -10,7 +10,7 @@ import {
   emberModel,
   heroModel,
   magmaModel,
-  portalModel,
+  qblockModel,
   upright,
   HERO_FOOT,
   LAVA_DROP,
@@ -26,12 +26,16 @@ const HERO_SCALE = 1.8;
 const HERO_RADIUS = HERO_BODY.h / 2;
 const LIVES = 3;
 const CRYSTAL_POINTS = 5;
-// Awarded for reaching the portal, on top of whatever the run carried in.
+// Awarded for reaching the "?" block, on top of whatever the run carried in.
 const CLEAR_POINTS = 30;
 const CRYSTAL_SCALE = 1.6;
 const CRYSTAL_REACH = 24;
-const PORTAL_SCALE = 2.4;
-const PORTAL_REACH = 42;
+const BLOCK_SCALE = 2;
+const BLOCK_REACH = 42;
+// How high the block's centre floats, in its own pixels: clear of the ground
+// by a little under half its height.
+const BLOCK_LIFT = QBLOCK_SIZE / 2 + 7;
+const HUD_MARGIN = 18;
 // A spot only counts as safe to come back to if there is rock this far from
 // it on every side, so a respawn never lands teetering on an edge.
 const SAFE_INSET = 30;
@@ -56,14 +60,15 @@ interface MagmaData {
  * four as an on-screen D-pad.
  *
  * Stepping off the rock costs a life and puts the hero back on the last solid
- * ground it stood on. The portal at the far end finishes the run; the
+ * ground it stood on. The "?" block at the far end finishes the run: it
+ * bursts and the power boost inside drops into the inventory slot. The
  * crystals along the way are a bonus, not a key.
  */
 export class MagmaScene extends Phaser.Scene {
   private world!: MagmaWorld;
   private hero!: Phaser.Physics.Arcade.Sprite;
   private crystals!: Phaser.Physics.Arcade.StaticGroup;
-  private portal!: Phaser.Physics.Arcade.Image;
+  private block!: Phaser.Physics.Arcade.Image;
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: Record<"up" | "down" | "left" | "right", Phaser.Input.Keyboard.Key>;
   /** Only on touch screens. */
@@ -73,6 +78,8 @@ export class MagmaScene extends Phaser.Scene {
   private crystalText!: Phaser.GameObjects.Text;
   private livesText!: Phaser.GameObjects.Text;
   private hintText?: Phaser.GameObjects.Text;
+  private itemSlot!: Phaser.GameObjects.Image;
+  private slotItem?: Phaser.GameObjects.Image;
 
   private score = 0;
   private collected = 0;
@@ -101,6 +108,7 @@ export class MagmaScene extends Phaser.Scene {
     this.sinking = false;
     this.steady = false;
     this.heroZ = 0;
+    this.slotItem = undefined;
 
     createTextures(this);
 
@@ -114,13 +122,13 @@ export class MagmaScene extends Phaser.Scene {
 
     this.buildWorld();
     this.placeCrystals();
-    this.placePortal();
+    this.placeBlock();
     this.spawnHero();
 
     this.physics.add.overlap(this.hero, this.crystals, (_hero, crystal) =>
       this.collectCrystal(crystal as Phaser.Physics.Arcade.Image)
     );
-    this.physics.add.overlap(this.hero, this.portal, () => this.reachPortal());
+    this.physics.add.overlap(this.hero, this.block, () => this.openBlock());
 
     this.bindInput();
     this.buildHud();
@@ -152,13 +160,9 @@ export class MagmaScene extends Phaser.Scene {
     view.add(emberModel(this.focus));
 
     view.setCameraRig((camera, dt) => {
-      // Once the run is over the hero is spinning into the portal (or gone
-      // under), and the camera shouldn't whirl round after it.
-      if (!this.finished) {
-        this.camAngle +=
-          Phaser.Math.Angle.Wrap(this.hero.rotation - this.camAngle) *
-          (1 - Math.exp(-CAM_EASE * dt));
-      }
+      this.camAngle +=
+        Phaser.Math.Angle.Wrap(this.hero.rotation - this.camAngle) *
+        (1 - Math.exp(-CAM_EASE * dt));
       // Phaser's y runs down the screen and Three's up, hence the flips.
       const fx = Math.cos(this.camAngle);
       const fy = -Math.sin(this.camAngle);
@@ -197,22 +201,20 @@ export class MagmaScene extends Phaser.Scene {
     });
   }
 
-  private placePortal(): void {
-    // Toward the back of the goal slab, so the hero walks across it to leave.
+  private placeBlock(): void {
+    // Toward the back of the goal slab, so the hero walks across it to get there.
     const { x, y } = this.world.goal;
-    this.portal = this.physics.add.staticImage(x, y - MAGMA_TILE * 0.9, "portal");
-    (this.portal.body as Phaser.Physics.Arcade.StaticBody).setCircle(
-      PORTAL_REACH,
-      PORTAL_SIZE / 2 - PORTAL_REACH,
-      PORTAL_SIZE / 2 - PORTAL_REACH
+    this.block = this.physics.add.staticImage(x, y - MAGMA_TILE * 0.9, "qblock");
+    (this.block.body as Phaser.Physics.Arcade.StaticBody).setCircle(
+      BLOCK_REACH,
+      QBLOCK_SIZE / 2 - BLOCK_REACH,
+      QBLOCK_SIZE / 2 - BLOCK_REACH
     );
-    // Standing on its edge and facing back down the causeway. It turns like
-    // the maze's portal, but in its own plane — spinning the Phaser object
-    // would twirl the whole gate around like a coin.
-    const gate = portalModel(this);
-    view3d(this).bind(this.portal, upright(gate, PORTAL_SIZE * 0.37, PORTAL_SCALE), {
-      sync: (_portal, _model, dt) => {
-        gate.rotation.z -= dt;
+    // Floating a little off the rock and bobbing, like the crystals.
+    const cube = qblockModel(this, { spin: true });
+    view3d(this).bind(this.block, upright(cube, BLOCK_LIFT, BLOCK_SCALE), {
+      sync: (_block, model) => {
+        model.position.z = Math.sin(this.time.now / 420) * 5;
       },
     });
   }
@@ -262,6 +264,12 @@ export class MagmaScene extends Phaser.Scene {
     for (const t of [this.scoreText, this.crystalText, this.livesText]) {
       t.setScrollFactor(0).setDepth(20);
     }
+    // The inventory slot sits empty until the "?" block's boost lands in it.
+    this.itemSlot = this.add
+      .image(0, 0, "item-slot")
+      .setScrollFactor(0)
+      .setDepth(20)
+      .setAlpha(0.45);
     this.updateCrystalText();
     this.updateLivesText();
 
@@ -305,6 +313,16 @@ export class MagmaScene extends Phaser.Scene {
     this.scoreText.setPosition(16, 14);
     this.crystalText.setPosition(16, 44);
     this.livesText.setPosition(w - 16, 14);
+    // Bottom right, not centred as in level 1: the middle of this screen's
+    // bottom edge has the hint on it, and on a phone the D-pad reaches it.
+    this.itemSlot.setPosition(
+      w - HUD_MARGIN - SLOT_SIZE / 2,
+      h - HUD_MARGIN - SLOT_SIZE / 2
+    );
+    // Leave the item alone mid-flight — the pickup tween owns its position.
+    if (this.slotItem && !this.tweens.isTweening(this.slotItem)) {
+      this.slotItem.setPosition(this.itemSlot.x, this.itemSlot.y);
+    }
     this.hintText?.setPosition(w / 2, h - 40).setWordWrapWidth(w - 32);
   }
 
@@ -416,36 +434,84 @@ export class MagmaScene extends Phaser.Scene {
     });
   }
 
-  private reachPortal(): void {
+  private openBlock(): void {
     if (this.finished || this.sinking) return;
     this.finished = true;
 
     this.score += CLEAR_POINTS;
     this.scoreText.setText(String(this.score));
-    playLevelClear();
+    playPowerUp();
 
     (this.hero.body as Phaser.Physics.Arcade.Body).setVelocity(0, 0);
     this.physics.pause();
     this.hero.anims.stop();
-
-    // Hero is lifted into the middle of the gate, spinning as it goes.
-    this.tweens.add({
-      targets: this.hero,
-      x: this.portal.x,
-      y: this.portal.y,
-      scale: 0,
-      angle: this.hero.angle + 720,
-      duration: 700,
-      ease: "Cubic.easeIn",
-    });
+    this.hero.setFrame(0);
+    // A couple of hops on the spot.
     this.tweens.add({
       targets: this,
-      heroZ: PORTAL_SIZE * 0.37 * PORTAL_SCALE,
-      duration: 700,
-      ease: "Cubic.easeIn",
+      heroZ: 26,
+      duration: 170,
+      ease: "Quad.easeOut",
+      yoyo: true,
+      repeat: 1,
     });
 
-    this.time.delayedCall(1100, () => {
+    // The block bursts. The HUD is flat and the block isn't, so everything
+    // from here on starts from where the block was on screen.
+    const from = view3d(this).toScreen(this.block.x, this.block.y, BLOCK_LIFT * BLOCK_SCALE);
+    this.tweens.add({
+      targets: this.block,
+      scale: 1.5,
+      alpha: 0,
+      duration: 220,
+      onComplete: () => this.block.destroy(),
+    });
+    this.add
+      .particles(from.x, from.y, "spark", {
+        speed: { min: 90, max: 320 },
+        scale: { start: 1.4, end: 0 },
+        alpha: { start: 1, end: 0 },
+        lifespan: 520,
+        blendMode: "ADD",
+        emitting: false,
+      })
+      .setScrollFactor(0)
+      .setDepth(19)
+      .explode(28);
+
+    // The power boost hangs where the block was for a beat, then flies into
+    // the slot.
+    const boost = this.add
+      .image(from.x, from.y, "boost")
+      .setScrollFactor(0)
+      .setDepth(21)
+      .setScale(0);
+    this.slotItem = boost;
+    this.itemSlot.setAlpha(1);
+    this.tweens.add({ targets: boost, scale: 2.6, duration: 260, ease: "Back.easeOut" });
+    this.tweens.add({
+      targets: boost,
+      x: this.itemSlot.x,
+      y: this.itemSlot.y,
+      scale: 1,
+      delay: 520,
+      duration: 520,
+      ease: "Cubic.easeInOut",
+    });
+    this.tweens.add({
+      targets: this.itemSlot,
+      scale: 1.25,
+      duration: 160,
+      delay: 1030,
+      yoyo: true,
+      ease: "Back.easeOut",
+    });
+
+    this.time.delayedCall(1050, () => {
+      playLevelClear();
+      this.flashMessage("POWER BOOST!", "#ffe23a");
+    });
+    this.time.delayedCall(2700, () => {
       this.cameras.main.fadeOut(300, 0, 0, 0);
       this.time.delayedCall(320, () => {
         this.scene.start("GameOverScene", { score: this.score, cleared: true });

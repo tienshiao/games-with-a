@@ -164,6 +164,17 @@ export class SceneView {
   }
 
   /**
+   * Where a point of the 3D world was drawn last frame, in Phaser screen
+   * pixels — for HUD effects that start from something in the world. Takes
+   * gameplay coordinates: Phaser's x and y, and height off the plane.
+   */
+  toScreen(x: number, y: number, z = 0): { x: number; y: number } {
+    const p = new THREE.Vector3(x, -y, z).project(this.camera);
+    const { width, height } = this.scene.scale;
+    return { x: ((p.x + 1) / 2) * width, y: ((1 - p.y) / 2) * height };
+  }
+
+  /**
    * Draw `obj` as `model` from now on. Phaser stops drawing the object but it
    * keeps its body, tweens and animations; destroying it removes the model.
    */
