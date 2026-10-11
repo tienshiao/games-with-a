@@ -9,6 +9,7 @@ import {
   QBLOCK_SIZE,
 } from "../textures";
 import type { Maze } from "../maze";
+import { MAGMA_TILE, type MagmaWorld } from "../magma";
 import { canvasTexture, type ModelHooks } from "./world3d";
 
 // Low-poly stand-ins for the old sprites. Each model is built in the sprite's
@@ -60,6 +61,22 @@ function seeded(seed: number): () => number {
 function alongX<T extends THREE.BufferGeometry>(g: T): T {
   g.rotateZ(-Math.PI / 2);
   return g;
+}
+
+/**
+ * Stand a model up for a level seen from the side rather than from above:
+ * its sprite "up" (+y) becomes height off the ground (+z), and what faced the
+ * top-down camera now faces the viewer walking up the level. `lift` raises it
+ * until it rests on the gameplay plane; the model's hooks carry over.
+ */
+export function upright(model: THREE.Object3D, lift = 0, scale = 1): THREE.Group {
+  model.rotation.x = Math.PI / 2;
+  model.position.z = lift * scale;
+  model.scale.setScalar(scale);
+  const group = new THREE.Group();
+  group.add(model);
+  Object.assign(group.userData, model.userData);
+  return group;
 }
 
 // --- Rocket --------------------------------------------------------------
@@ -211,12 +228,15 @@ export function qblockModel(scene: Phaser.Scene): THREE.Group {
 
 // --- Hero --------------------------------------------------------------
 // The striped triangle as a prism: yellow and orange slices, bristles along
-// the top, two rows of stick legs, and a big eye on the camera side.
+// the top, two rows of stick legs, and a big eye on the camera side — or on
+// both sides, for a level where the camera can get round the back of it.
 
 /** Hero body depth (z), in sprite pixels. */
 const HERO_DEPTH = 12;
+/** From the middle of the hero's sprite cell down to the tips of its legs. */
+export const HERO_FOOT = HERO_BODY.y + HERO_BODY.h - HERO_SIZE / 2 + 5.5;
 
-export function heroModel(): THREE.Group {
+export function heroModel(opts: { bothSides?: boolean } = {}): THREE.Group {
   const group = new THREE.Group();
 
   // Sprite coordinates (y down, origin top-left of the 40px cell) to model.
@@ -306,23 +326,21 @@ export function heroModel(): THREE.Group {
   const eyeX = 27 - half;
   const eyeY = half - (HERO_BODY.y + HERO_BODY.h / 2 - 1);
   const front = HERO_DEPTH / 2;
-  const eye = mesh(
-    geo("hero-eye", () => new THREE.IcosahedronGeometry(3.5, 1)),
-    mat(0xffffff, { roughness: 0.3 })
-  );
-  eye.position.set(eyeX, eyeY, front);
-  const pupil = mesh(
-    geo("hero-pupil", () => new THREE.IcosahedronGeometry(1.8, 0)),
-    mat(0x000000, { roughness: 0.2 })
-  );
-  pupil.position.set(eyeX + 1, eyeY, front + 2.6);
-  const smile = mesh(
-    geo("hero-smile", () => new THREE.TorusGeometry(3, 0.6, 3, 8, Math.PI - 0.4)),
-    black
-  );
-  smile.position.set(eyeX + 1, eyeY - 4, front + 0.2);
-  smile.rotation.z = Math.PI + 0.2;
-  group.add(eye, pupil, smile);
+  const white = mat(0xffffff, { roughness: 0.3 });
+  const pupilMat = mat(0x000000, { roughness: 0.2 });
+  for (const side of opts.bothSides ? [1, -1] : [1]) {
+    const eye = mesh(geo("hero-eye", () => new THREE.IcosahedronGeometry(3.5, 1)), white);
+    eye.position.set(eyeX, eyeY, side * front);
+    const pupil = mesh(geo("hero-pupil", () => new THREE.IcosahedronGeometry(1.8, 0)), pupilMat);
+    pupil.position.set(eyeX + 1, eyeY, side * (front + 2.6));
+    const smile = mesh(
+      geo("hero-smile", () => new THREE.TorusGeometry(3, 0.6, 3, 8, Math.PI - 0.4)),
+      black
+    );
+    smile.position.set(eyeX + 1, eyeY - 4, side * (front + 0.2));
+    smile.rotation.z = Math.PI + 0.2;
+    group.add(eye, pupil, smile);
+  }
 
   setFrame(0);
   hooks(group).frame = setFrame;
@@ -490,4 +508,258 @@ export function mazeModel(maze: Maze): THREE.Group {
   place(floorMesh, floors, FLOOR_Z, (tx, ty) => ((tx + ty) % 2 === 0 ? 1 : 0.8));
 
   return group;
+}
+
+// --- Magma world ---------------------------------------------------------
+// The fourth level is seen from behind the hero, so this is a whole landscape
+// rather than a board: slabs of cooled rock with heat glowing up through the
+// cracks between them, a lake of lava running out to the horizon, a smoky sky
+// and a ring of volcanoes. Ground is the z = 0 plane; +z is up.
+
+/** The haze the lava fades into, and the sky's colour where it meets it. */
+export const MAGMA_HAZE = 0x9c2c12;
+/** How far the lava's surface sits below the top of the rock. */
+export const LAVA_DROP = 22;
+const SLAB_GAP = 7;
+const SLAB_DEPTH = 60;
+const SKY_RADIUS = 7000;
+const LAVA_SPAN = 16000;
+
+export function magmaModel(world: MagmaWorld): THREE.Group {
+  const group = new THREE.Group();
+  const w = world.cols * MAGMA_TILE;
+  const h = world.rows * MAGMA_TILE;
+  const centre = new THREE.Vector3(w / 2, -h / 2, 0);
+
+  const tiles: Array<[number, number]> = [];
+  for (let ty = 0; ty < world.rows; ty++) {
+    for (let tx = 0; tx < world.cols; tx++) {
+      if (world.rock[ty]![tx]) tiles.push([tx, ty]);
+    }
+  }
+
+  // Rock: one slab per tile, a little smaller than the tile so the glow
+  // underneath shows as a seam around each one.
+  const rnd = seeded(6151);
+  const slabs = new THREE.InstancedMesh(
+    geo("magma-slab", () =>
+      new THREE.BoxGeometry(MAGMA_TILE - SLAB_GAP, MAGMA_TILE - SLAB_GAP, SLAB_DEPTH).translate(
+        0,
+        0,
+        -SLAB_DEPTH / 2
+      )
+    ),
+    mat(0xffffff, { roughness: 1 }),
+    tiles.length
+  );
+  const seams = new THREE.InstancedMesh(
+    geo("magma-seam", () => new THREE.PlaneGeometry(MAGMA_TILE, MAGMA_TILE)),
+    new THREE.MeshBasicMaterial({ color: 0xff8a1e }),
+    tiles.length
+  );
+  const m = new THREE.Matrix4();
+  const c = new THREE.Color();
+  const basalt = new THREE.Color(0x4a4046);
+  tiles.forEach(([tx, ty], i) => {
+    const x = (tx + 0.5) * MAGMA_TILE;
+    const y = -(ty + 0.5) * MAGMA_TILE;
+    slabs.setMatrixAt(i, m.makeTranslation(x, y, 0));
+    slabs.setColorAt(i, c.copy(basalt).multiplyScalar(0.8 + rnd() * 0.4));
+    seams.setMatrixAt(i, m.makeTranslation(x, y, -5));
+  });
+  group.add(slabs, seams);
+
+  // Lava: the same painted texture twice, the upper copy added on top and
+  // sliding the other way, so bright patches swell and fade as they cross.
+  const lavaGeo = geo("magma-lava", () => new THREE.PlaneGeometry(LAVA_SPAN, LAVA_SPAN));
+  const flow = lavaTexture(420);
+  const shimmer = lavaTexture(610);
+  const lava = mesh(lavaGeo, new THREE.MeshBasicMaterial({ map: flow }));
+  lava.position.set(centre.x, centre.y, -LAVA_DROP);
+  const glow = mesh(
+    lavaGeo,
+    new THREE.MeshBasicMaterial({
+      map: shimmer,
+      transparent: true,
+      opacity: 0.45,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    })
+  );
+  glow.position.set(centre.x, centre.y, -LAVA_DROP + 1);
+  group.add(lava, glow);
+
+  // Sky: a dome shaded from the haze at the horizon up to near-black. It and
+  // the volcanoes ignore the fog — they are what the fog fades into.
+  const sky = mesh(
+    geo("magma-sky", buildSky),
+    new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false })
+  );
+  sky.position.copy(centre);
+  group.add(sky);
+
+  const cone = new THREE.MeshBasicMaterial({ color: 0x1d0a0d, fog: false });
+  const crater = new THREE.MeshBasicMaterial({ color: 0xffa02a, fog: false });
+  const ring = seeded(8089);
+  const count = 7;
+  for (let i = 0; i < count; i++) {
+    const angle = ((i + ring() * 0.6) / count) * Math.PI * 2;
+    const dist = 3400 + ring() * 1800;
+    const height = 900 + ring() * 1100;
+    const volcano = mesh(
+      geo("magma-volcano", () =>
+        new THREE.CylinderGeometry(0.16, 1, 1, 7).rotateX(Math.PI / 2).translate(0, 0, 0.5)
+      ),
+      cone
+    );
+    volcano.scale.set(height * 0.85, height * 0.85, height);
+    volcano.position.set(
+      centre.x + Math.cos(angle) * dist,
+      centre.y + Math.sin(angle) * dist,
+      -LAVA_DROP
+    );
+    volcano.rotation.z = ring() * Math.PI;
+    // A plug of lava brimming over the lip, so the summit glows from below.
+    const brim = mesh(
+      geo("magma-brim", () =>
+        new THREE.CylinderGeometry(0.11, 0.165, 0.05, 7).rotateX(Math.PI / 2).translate(0, 0, 1.0)
+      ),
+      crater
+    );
+    volcano.add(brim);
+    group.add(volcano);
+  }
+
+  hooks(group).sync = (dt) => {
+    flow.offset.x += dt * 0.012;
+    flow.offset.y += dt * 0.005;
+    shimmer.offset.x -= dt * 0.009;
+    shimmer.offset.y += dt * 0.014;
+  };
+  return group;
+}
+
+function buildSky(): THREE.BufferGeometry {
+  // Poles turned onto the z axis so the bands of colour run level.
+  const g = new THREE.SphereGeometry(SKY_RADIUS, 20, 12).rotateX(Math.PI / 2);
+  const pos = g.attributes.position as THREE.BufferAttribute;
+  const stops: Array<[number, THREE.Color]> = [
+    [0, new THREE.Color(MAGMA_HAZE)],
+    [0.1, new THREE.Color(0x5c1712)],
+    [0.32, new THREE.Color(0x250a10)],
+    [1, new THREE.Color(0x09040a)],
+  ];
+  const colors: number[] = [];
+  const c = new THREE.Color();
+  for (let i = 0; i < pos.count; i++) {
+    const t = Math.max(0, pos.getZ(i) / SKY_RADIUS);
+    let k = 1;
+    while (k < stops.length - 1 && stops[k]![0] < t) k++;
+    const [t0, c0] = stops[k - 1]!;
+    const [t1, c1] = stops[k]!;
+    c.copy(c0).lerp(c1, (t - t0) / (t1 - t0));
+    colors.push(c.r, c.g, c.b);
+  }
+  g.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+  return g;
+}
+
+let lavaCanvas: HTMLCanvasElement | undefined;
+const lavaTextures = new Map<number, THREE.Texture>();
+/**
+ * A tileable patch of lava — molten orange, hot spots, and rafts of dark
+ * crust — repeating every `tile` pixels of lake.
+ */
+function lavaTexture(tile: number): THREE.Texture {
+  let tex = lavaTextures.get(tile);
+  if (tex) return tex;
+  if (!lavaCanvas) {
+    const n = 256;
+    lavaCanvas = document.createElement("canvas");
+    lavaCanvas.width = lavaCanvas.height = n;
+    const c = lavaCanvas.getContext("2d")!;
+    c.fillStyle = "#f25c05";
+    c.fillRect(0, 0, n, n);
+    const rnd = seeded(9001);
+    // Drawn at every wrap-around position so blobs crossing an edge continue
+    // on the opposite one.
+    const blob = (inner: string, outer: string, min: number, max: number): void => {
+      const x = rnd() * n;
+      const y = rnd() * n;
+      const r = min + rnd() * (max - min);
+      for (const ox of [-n, 0, n]) {
+        for (const oy of [-n, 0, n]) {
+          const g = c.createRadialGradient(x + ox, y + oy, r * 0.15, x + ox, y + oy, r);
+          g.addColorStop(0, inner);
+          g.addColorStop(1, outer);
+          c.fillStyle = g;
+          c.fillRect(x + ox - r, y + oy - r, r * 2, r * 2);
+        }
+      }
+    };
+    for (let i = 0; i < 22; i++) blob("rgba(255,214,90,0.85)", "rgba(255,150,20,0)", 16, 44);
+    for (let i = 0; i < 30; i++) blob("rgba(58,10,6,0.9)", "rgba(110,22,4,0)", 14, 40);
+  }
+  // One image, but each tile size scrolls on its own, so each gets a texture.
+  tex = new THREE.CanvasTexture(lavaCanvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.setScalar(LAVA_SPAN / tile);
+  lavaTextures.set(tile, tex);
+  return tex;
+}
+
+/**
+ * Embers drifting up off the lava. They fill a box that stays centred on
+ * `focus` — a point the scene keeps on the hero — by wrapping round its
+ * edges, so there are always some nearby without simulating the whole lake.
+ */
+export function emberModel(focus: THREE.Vector3): THREE.Points {
+  const count = 160;
+  const span = new THREE.Vector3(1500, 1500, 420);
+  const rnd = seeded(3319);
+  const home = new Float32Array(count * 3);
+  const rise = new Float32Array(count);
+  for (let i = 0; i < count; i++) {
+    home[i * 3] = rnd() * span.x;
+    home[i * 3 + 1] = rnd() * span.y;
+    home[i * 3 + 2] = rnd() * span.z;
+    rise[i] = 18 + rnd() * 46;
+  }
+  const g = new THREE.BufferGeometry();
+  const pos = new THREE.BufferAttribute(new Float32Array(count * 3), 3);
+  g.setAttribute("position", pos);
+
+  const points = new THREE.Points(
+    g,
+    new THREE.PointsMaterial({
+      color: 0xffa640,
+      size: 7,
+      transparent: true,
+      opacity: 0.9,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      fog: false,
+    })
+  );
+  // The positions are rewritten every frame, so the bounds are never right.
+  points.frustumCulled = false;
+
+  const wrap = (v: number, centre: number, size: number) =>
+    centre + ((((v - centre) % size) + size) % size) - size / 2;
+  let t = 0;
+  hooks(points).sync = (dt) => {
+    t += dt;
+    for (let i = 0; i < count; i++) {
+      const sway = Math.sin(t * 0.7 + i) * 14;
+      pos.setXYZ(
+        i,
+        wrap(home[i * 3]! + sway, focus.x, span.x),
+        wrap(home[i * 3 + 1]!, focus.y, span.y),
+        -LAVA_DROP + ((home[i * 3 + 2]! + rise[i]! * t) % span.z)
+      );
+    }
+    pos.needsUpdate = true;
+  };
+  return points;
 }

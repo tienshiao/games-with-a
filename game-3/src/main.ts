@@ -3,6 +3,7 @@ import { MenuScene } from "./scenes/MenuScene";
 import { GameScene } from "./scenes/GameScene";
 import { MazeScene } from "./scenes/MazeScene";
 import { CrystalScene } from "./scenes/CrystalScene";
+import { MagmaScene } from "./scenes/MagmaScene";
 import { GameOverScene } from "./scenes/GameOverScene";
 import { initWorld3D } from "./three/world3d";
 
@@ -28,7 +29,7 @@ const config: Phaser.Types.Core.GameConfig = {
       debug: false,
     },
   },
-  scene: [MenuScene, GameScene, MazeScene, CrystalScene, GameOverScene],
+  scene: [MenuScene, GameScene, MazeScene, CrystalScene, MagmaScene, GameOverScene],
 };
 
 const game = new Phaser.Game(config);

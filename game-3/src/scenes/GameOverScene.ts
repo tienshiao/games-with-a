@@ -6,7 +6,7 @@ import { playClick } from "../sounds";
 
 interface GameOverData {
   score?: number;
-  /** Set when the player reached the level 3 crystal rather than crashing. */
+  /** Set when the player reached the level 4 portal rather than crashing. */
   cleared?: boolean;
 }
 
@@ -40,7 +40,7 @@ export class GameOverScene extends Phaser.Scene {
       return obj;
     };
 
-    add(0.25, cleared ? "CRYSTAL CLAIMED!" : "GAME OVER", {
+    add(0.25, cleared ? "MAGMA ESCAPED!" : "GAME OVER", {
       fontSize: cleared ? "42px" : "56px",
       fontFamily: "monospace",
       fontStyle: "bold",

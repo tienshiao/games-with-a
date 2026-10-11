@@ -28,7 +28,8 @@ interface CrystalData {
 
 /**
  * Level 3. A single open chamber with the crystal at its centre — no walls, no
- * timer. Walk the hero from game 2 into the crystal and the run is finished.
+ * timer. Walk the hero from game 2 into the crystal and it carries them on to
+ * the magma world.
  */
 export class CrystalScene extends Phaser.Scene {
   private starfield!: Starfield;
@@ -300,7 +301,7 @@ export class CrystalScene extends Phaser.Scene {
     this.time.delayedCall(1400, () => {
       this.cameras.main.fadeOut(300, 0, 0, 0);
       this.time.delayedCall(320, () => {
-        this.scene.start("GameOverScene", { score: this.score, cleared: true });
+        this.scene.start("MagmaScene", { score: this.score });
       });
     });
   }

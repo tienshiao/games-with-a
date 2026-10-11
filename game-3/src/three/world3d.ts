@@ -10,8 +10,9 @@ import * as THREE from "three";
 // Coordinates: one Three unit is one Phaser pixel, on the z = 0 plane, with y
 // flipped (Three's y points up). The camera is a perspective camera placed so
 // that plane lines up with Phaser's camera pixel for pixel — gameplay reads
-// exactly as before, but anything with depth shows its sides. Changing the
-// perspective later means moving that camera; the bindings don't care.
+// exactly as before, but anything with depth shows its sides. A scene that
+// wants another angle hands the view a camera rig (see setCameraRig) — the
+// magma level's chase camera is one; the bindings don't care.
 
 /** Vertical field of view. Narrow enough that the z = 0 plane barely warps. */
 const FOV = 32;
@@ -39,6 +40,9 @@ export interface ModelHooks {
   frame?: (frame: number) => void;
   tint?: (tinted: boolean, color: number) => void;
 }
+
+/** Places the camera each frame in place of the default top-down framing. */
+export type CameraRig = (camera: THREE.PerspectiveCamera, dt: number) => void;
 
 interface Binding {
   obj: Bindable;
@@ -113,12 +117,17 @@ export class SceneView {
   readonly world = new THREE.Scene();
   /** Screen-space scenery behind everything (stars, distant planets). */
   readonly backdrop = new THREE.Scene();
+  /** The two default lights, exposed so a scene can retune them to its mood. */
+  readonly fill = new THREE.HemisphereLight(0xc4d4ff, 0x2a2440, 1.5);
+  readonly sun = new THREE.DirectionalLight(0xffffff, 2.4);
 
   private scene: Phaser.Scene;
   private camera = new THREE.PerspectiveCamera(FOV, 1, 1, 10000);
   private backdropCamera = new THREE.OrthographicCamera(0, 1, 0, -1, -1000, 1000);
   private background = new THREE.Color(DEFAULT_BACKGROUND);
   private bindings = new Map<Phaser.GameObjects.GameObject, Binding>();
+  private scenery: THREE.Object3D[] = [];
+  private rig?: CameraRig;
 
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
@@ -126,21 +135,32 @@ export class SceneView {
 
     // Key light from the upper left and slightly in front, like the old
     // sprites' painted highlights, over a cool sky/ground fill.
-    this.world.add(new THREE.HemisphereLight(0xc4d4ff, 0x2a2440, 1.5));
-    const sun = new THREE.DirectionalLight(0xffffff, 2.4);
-    sun.position.set(-0.6, 0.9, 1);
-    this.world.add(sun);
+    this.sun.position.set(-0.6, 0.9, 1);
+    this.world.add(this.fill, this.sun);
 
     scene.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.dispose());
   }
 
-  setBackground(color: string): void {
+  setBackground(color: THREE.ColorRepresentation): void {
     this.background.set(color);
   }
 
-  /** Static scenery that isn't tied to a Phaser object (maze walls, floor). */
+  /**
+   * Take over the camera. The rig owns position, aim, fov and clip planes; the
+   * view still sets the aspect before calling it and updates the projection
+   * after.
+   */
+  setCameraRig(rig: CameraRig): void {
+    this.rig = rig;
+  }
+
+  /**
+   * Scenery that isn't tied to a Phaser object (maze walls, floor). It can
+   * still move on its own: a `sync` hook in its userData runs every frame.
+   */
   add(object: THREE.Object3D): void {
     this.world.add(object);
+    this.scenery.push(object);
   }
 
   /**
@@ -213,6 +233,7 @@ export class SceneView {
 
   render(r: THREE.WebGLRenderer, dt: number): void {
     for (const b of this.bindings.values()) this.syncBinding(b, dt);
+    for (const s of this.scenery) (s.userData as ModelHooks).sync?.(dt);
 
     const cam = this.scene.cameras.main;
     const w = cam.width;
@@ -227,16 +248,20 @@ export class SceneView {
     const sx = shake.isRunning ? shake._offsetX : 0;
     const sy = shake.isRunning ? shake._offsetY : 0;
 
-    // Point the camera at the middle of Phaser's view, backed off until the
-    // z = 0 plane fills the screen exactly.
-    const cx = cam.scrollX + w / 2 - sx / cam.zoom;
-    const cy = cam.scrollY + h / 2 - sy / cam.zoom;
-    const dist = h / cam.zoom / 2 / Math.tan(THREE.MathUtils.degToRad(FOV / 2));
     this.camera.aspect = w / h;
-    this.camera.near = dist * 0.05;
-    this.camera.far = dist * 4;
-    this.camera.position.set(cx, -cy, dist);
-    this.camera.lookAt(cx, -cy, 0);
+    if (this.rig) {
+      this.rig(this.camera, dt);
+    } else {
+      // Point the camera at the middle of Phaser's view, backed off until the
+      // z = 0 plane fills the screen exactly.
+      const cx = cam.scrollX + w / 2 - sx / cam.zoom;
+      const cy = cam.scrollY + h / 2 - sy / cam.zoom;
+      const dist = h / cam.zoom / 2 / Math.tan(THREE.MathUtils.degToRad(FOV / 2));
+      this.camera.near = dist * 0.05;
+      this.camera.far = dist * 4;
+      this.camera.position.set(cx, -cy, dist);
+      this.camera.lookAt(cx, -cy, 0);
+    }
     this.camera.updateProjectionMatrix();
 
     this.backdropCamera.left = -sx;
@@ -295,6 +320,7 @@ export class SceneView {
     for (const obj of [...this.bindings.keys()]) this.unbind(obj);
     this.world.clear();
     this.backdrop.clear();
+    this.scenery.length = 0;
     views.delete(this.scene);
     if (current === this) current = undefined;
   }
