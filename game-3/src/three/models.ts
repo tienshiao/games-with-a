@@ -474,6 +474,298 @@ export function portalModel(scene: Phaser.Scene): THREE.Group {
   return group;
 }
 
+// --- Magma monster ----------------------------------------------------------
+// The boss of the magma level, after a set of crayon sketches: four forms,
+// each smaller than the last. Molten orange with yellow hot spots, lumps of
+// grey rock stuck in it, and white triangles for angry eyes.
+//
+// Unlike the sprite stand-ins these are built standing in the world — facing
+// +x, up is +z, in world pixels — so they need no upright(). A tint on the
+// bound object cools the molten parts toward it; the rock and the face stay.
+
+type Vec = [x: number, y: number, z: number];
+type Outline = Array<[across: number, up: number]>;
+
+const rect = (w: number, h: number): Outline => [
+  [-w / 2, -h / 2],
+  [w / 2, -h / 2],
+  [w / 2, h / 2],
+  [-w / 2, h / 2],
+];
+
+function monsterKit(skinColor = 0xf2641a) {
+  const group = new THREE.Group();
+  const skin = mat(skinColor, { emissive: 0x8a2400, roughness: 0.65 });
+  const glow = mat(0xffd23a, { emissive: 0xc88a00, roughness: 0.4 });
+  const stone = mat(0x8f887c, { roughness: 1 });
+  const white = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+  const dark = new THREE.MeshBasicMaterial({ color: 0x35240f, side: THREE.DoubleSide });
+  const tooth = new THREE.MeshBasicMaterial({ color: 0xffe9a8, side: THREE.DoubleSide });
+
+  // The molten parts ease toward the tint rather than snapping to it.
+  const molten = [skin, glow].map((m) => ({
+    m,
+    color: m.color.clone(),
+    emissive: m.emissive.clone(),
+  }));
+  const tint = new THREE.Color(0xffffff);
+  const target = new THREE.Color();
+  hooks(group).tint = (tinted, color) => {
+    target.setHex(tinted ? color : 0xffffff);
+    tint.lerp(target, 0.12);
+    for (const { m, color: base, emissive } of molten) {
+      m.color.copy(base).multiply(tint);
+      m.emissive.copy(emissive).multiply(tint);
+    }
+  };
+
+  const blob = (
+    r: number,
+    at: Vec,
+    stretch: Vec = [1, 1, 1],
+    material: THREE.Material = skin
+  ): THREE.Mesh => {
+    const b = mesh(geo("monster-blob", () => new THREE.IcosahedronGeometry(1, 1)), material);
+    b.position.set(...at);
+    b.scale.set(r * stretch[0], r * stretch[1], r * stretch[2]);
+    return b;
+  };
+  const rock = (r: number, at: Vec): THREE.Mesh => {
+    const b = mesh(geo("monster-rock", () => new THREE.DodecahedronGeometry(1, 0)), stone);
+    b.position.set(...at);
+    b.scale.setScalar(r);
+    b.rotation.set(...at); // any fixed tumble will do, so no two sit alike
+    return b;
+  };
+  const slab = (size: Vec, at: Vec, material: THREE.Material): THREE.Mesh => {
+    const b = mesh(geo("monster-slab", () => new THREE.BoxGeometry(1, 1, 1)), material);
+    b.position.set(...at);
+    b.scale.set(...size);
+    return b;
+  };
+  /** A flat shape facing forward: its outline is (across, up) around `at`. */
+  const plate = (outline: Outline, at: Vec, material: THREE.Material): THREE.Mesh => {
+    const g = geo(`monster-plate-${outline.join()}`, () =>
+      new THREE.ShapeGeometry(new THREE.Shape(outline.map(([a, b]) => new THREE.Vector2(a, b))))
+        .rotateX(Math.PI / 2)
+        .rotateZ(Math.PI / 2)
+    );
+    const p = mesh(g, material);
+    p.position.set(...at);
+    return p;
+  };
+  /**
+   * Two white triangles, their top edges sloping down toward the middle. Each
+   * is swung `yaw` round the head's centre so it lies against the curve,
+   * `reach` out from it and `lift` above.
+   */
+  const eyes = (
+    centre: Vec,
+    reach: number,
+    yaw: number,
+    w: number,
+    h: number,
+    lift = 0
+  ): THREE.Group[] =>
+    [1, -1].map((s) => {
+      const pivot = new THREE.Group();
+      pivot.position.set(...centre);
+      pivot.rotation.z = s * yaw;
+      pivot.add(
+        plate(
+          [
+            [(-s * w) / 2, 0],
+            [(s * w) / 2, 0],
+            [(s * w) / 2, h],
+          ],
+          [reach, 0, lift],
+          white
+        )
+      );
+      return pivot;
+    });
+  /** A dark slot with blunt teeth along the top and bottom. */
+  const mouth = (at: Vec, w: number, h: number, teeth: number): THREE.Mesh[] => {
+    const parts = [plate(rect(w, h), at, dark)];
+    const tw = w / teeth;
+    for (let i = 0; i < teeth; i++) {
+      const across = -w / 2 + (i + 0.5) * tw;
+      for (const s of [1, -1]) {
+        parts.push(
+          plate(
+            rect(tw * 0.55, h * 0.3),
+            [at[0] + 0.5, at[1] + across, at[2] + s * h * 0.35],
+            tooth
+          )
+        );
+      }
+    }
+    return parts;
+  };
+
+  return { group, skin, glow, white, dark, blob, rock, slab, plate, eyes, mouth };
+}
+
+/** The boss in one of its four forms, 0 the first and largest. */
+export function monsterModel(form: number): THREE.Group {
+  return [giantForm, slugForm, eggForm, pebbleForm][form]!();
+}
+
+// First form: a great splat of a thing on two legs, arms up, a fist of rock
+// on every limb and another on its brow. The mouth is in its belly.
+function giantForm(): THREE.Group {
+  const k = monsterKit();
+  const body = new THREE.Group();
+  k.group.add(body);
+  body.add(
+    k.blob(62, [0, 0, 92], [0.85, 1.05, 1]),
+    // Hot patches where the crust is thin
+    k.blob(13, [43, 38, 118], [0.4, 1, 1], k.glow),
+    k.blob(10, [44, -36, 62], [0.4, 1, 1], k.glow),
+    k.blob(13, [-45, 12, 100], [0.4, 1, 1], k.glow),
+    k.slab([12, 70, 50], [47, 0, 88], k.glow),
+    ...k.mouth([53.6, 0, 88], 56, 36, 4),
+    k.blob(36, [6, 0, 170], [0.9, 1, 0.95]),
+    k.rock(15, [14, 0, 204]),
+    ...k.eyes([6, 0, 170], 33.5, 0.42, 20, 18, -4)
+  );
+
+  const arms: THREE.Group[] = [];
+  for (const s of [1, -1]) {
+    const arm = new THREE.Group();
+    arm.position.set(0, s * 46, 122);
+    const upper = k.blob(24, [0, s * 32, 14], [0.9, 1.6, 0.9]);
+    upper.rotation.x = s * 0.42;
+    arm.add(upper, k.blob(28, [4, s * 68, 30]), k.rock(19, [18, s * 74, 36]));
+    arms.push(arm);
+
+    const leg = new THREE.Group();
+    leg.position.set(0, s * 40, 50);
+    leg.add(
+      k.blob(27, [0, s * 10, -14], [1, 1.1, 1.4]),
+      k.blob(30, [10, s * 34, -30], [1.3, 1, 0.75]),
+      k.rock(18, [32, s * 38, -24])
+    );
+    body.add(arm, leg);
+  }
+
+  let t = 0;
+  hooks(k.group).sync = (dt) => {
+    t += dt;
+    // A slow rolling waddle, arms swinging against it.
+    body.rotation.x = Math.sin(t * 3) * 0.06;
+    body.position.z = Math.abs(Math.sin(t * 3)) * 4;
+    arms.forEach((arm, i) => {
+      arm.rotation.x = Math.sin(t * 3 + i * Math.PI) * 0.2;
+    });
+  };
+  return k.group;
+}
+
+// Second form: a slug, long and low, with its head reared up at the front.
+// Spots of yellow and grey down its back, and a heart for a mouth.
+function slugForm(): THREE.Group {
+  const k = monsterKit();
+  const sizes = [20, 28, 34, 38, 40];
+  const along = [-98, -70, -36, 2, 40];
+  const segments = sizes.map((r, i) => {
+    const seg = new THREE.Group();
+    seg.position.x = along[i]!;
+    const top: Vec = [0, ((i % 3) - 1) * r * 0.3, r * 1.52];
+    seg.add(
+      k.blob(r, [0, 0, r * 0.78], [1.05, 1, 0.82]),
+      i % 2 === 0 ? k.blob(r * 0.24, top, [1, 1, 0.4], k.glow) : k.rock(r * 0.2, top)
+    );
+    return seg;
+  });
+
+  const heart: Outline = [
+    [0, -1],
+    [0.9, 0],
+    [1, 0.55],
+    [0.55, 1],
+    [0, 0.6],
+    [-0.55, 1],
+    [-1, 0.55],
+    [-0.9, 0],
+  ];
+  const head = new THREE.Group();
+  head.add(
+    k.blob(31, [66, 0, 62], [0.9, 0.95, 1.35]),
+    k.blob(34, [72, 0, 108], [0.95, 1, 1.1]),
+    ...k.eyes([72, 0, 108], 33.3, 0.4, 17, 16, 2),
+    k.plate(
+      heart.map(([a, b]) => [a * 11, b * 11]),
+      [100.5, 0, 86],
+      k.white
+    )
+  );
+  k.group.add(...segments, head);
+
+  let t = 0;
+  hooks(k.group).sync = (dt) => {
+    t += dt;
+    // A wave running down to the tail, widest at the tip of it.
+    segments.forEach((seg, i) => {
+      seg.position.y = Math.sin(t * 5 + i * 0.9) * (10 - i * 2);
+    });
+    head.rotation.x = Math.sin(t * 2.5) * 0.05;
+  };
+  return k.group;
+}
+
+// Third form: an egg with a point on top, a rock stuck in its side and a
+// mouthful of teeth.
+function eggForm(): THREE.Group {
+  const k = monsterKit();
+  const body = new THREE.Group();
+  const tuft = mesh(
+    geo("monster-tuft", () => new THREE.ConeGeometry(1, 1, 5).rotateX(Math.PI / 2)),
+    k.skin
+  );
+  tuft.position.set(0, 0, 98);
+  tuft.scale.set(9, 9, 20);
+  body.add(
+    k.blob(40, [0, 0, 47], [0.92, 0.96, 1.18]),
+    tuft,
+    k.rock(14, [4, 36, 52]),
+    k.blob(8, [-31, -14, 60], [0.4, 1, 1], k.glow),
+    k.slab([8, 32, 23], [30, 0, 28], k.glow),
+    ...k.mouth([35.5, 0, 28], 26, 17, 3),
+    ...k.eyes([0, 0, 52], 37.5, 0.42, 15, 13, 4)
+  );
+  k.group.add(body);
+
+  let t = 0;
+  hooks(k.group).sync = (dt) => {
+    t += dt;
+    const squash = Math.sin(t * 7) * 0.05;
+    body.scale.set(1 - squash / 2, 1 - squash / 2, 1 + squash);
+  };
+  return k.group;
+}
+
+// Last form: all that's left, a pebble of it with a dot of a face.
+function pebbleForm(): THREE.Group {
+  const k = monsterKit(0xe0581a);
+  const body = new THREE.Group();
+  body.add(
+    k.blob(16, [0, 0, 17]),
+    k.blob(5.5, [0, 0, 34]),
+    k.plate(rect(4, 5), [15.6, 5.5, 20], k.dark),
+    k.plate(rect(4, 5), [15.6, -5.5, 20], k.dark),
+    k.plate(rect(8, 2.5), [15.9, 0, 12.5], k.dark)
+  );
+  k.group.add(body);
+
+  let t = 0;
+  hooks(k.group).sync = (dt) => {
+    t += dt;
+    body.rotation.x = Math.sin(t * 14) * 0.16;
+  };
+  return k.group;
+}
+
 // --- Maze ------------------------------------------------------------------
 // Walls are raised blocks and corridors are floor tiles, both instanced so the
 // whole maze is two draw calls. The walls rise above the gameplay plane so the

@@ -172,6 +172,25 @@ export function playPowerUp(): void {
   playTone({ freq: 1046, duration: 0.18, type: "square", gain: 0.11, startAt: 0.18 });
 }
 
+export function playRoar(): void {
+  // The boss arriving, or changing shape: a growl sliding down over a rumble.
+  playTone({ freq: 150, endFreq: 48, duration: 0.8, type: "sawtooth", gain: 0.16, release: 0.3 });
+  playTone({ freq: 96, endFreq: 40, duration: 0.8, type: "square", gain: 0.07, release: 0.3 });
+  playNoise({
+    duration: 0.8,
+    freq: 500,
+    endFreq: 120,
+    filter: "lowpass",
+    gain: 0.16,
+  });
+}
+
+export function playBossHit(): void {
+  // Ramming the boss: a thud with a crack on top.
+  playTone({ freq: 190, endFreq: 60, duration: 0.2, type: "square", gain: 0.16 });
+  playNoise({ duration: 0.16, freq: 1800, endFreq: 500, filter: "bandpass", q: 0.7, gain: 0.14 });
+}
+
 export function playLevelClear(): void {
   // Four-note rising fanfare with a shimmer of noise on the last note.
   const notes = [523, 659, 784, 1046];
