@@ -214,3 +214,32 @@ export function playClick(): void {
   // UI tap
   playTone({ freq: 600, endFreq: 900, duration: 0.07, type: "square", gain: 0.1 });
 }
+
+export function playLaunch(): void {
+  // Rocket engines lighting: a roar of noise that opens up and then rumbles away.
+  playNoise({
+    duration: 1.8,
+    freq: 260,
+    endFreq: 900,
+    filter: "lowpass",
+    gain: 0.24,
+    attack: 0.12,
+    rate: 0.5,
+  });
+  playNoise({
+    duration: 1.5,
+    freq: 1400,
+    endFreq: 3200,
+    filter: "bandpass",
+    q: 0.6,
+    gain: 0.08,
+    attack: 0.2,
+  });
+  playTone({ freq: 48, endFreq: 70, duration: 1.4, type: "sawtooth", gain: 0.06, release: 0.6 });
+}
+
+export function playLand(): void {
+  // Feet on the grass: a soft thump and a brush of noise.
+  playTone({ freq: 140, endFreq: 55, duration: 0.18, type: "sine", gain: 0.22 });
+  playNoise({ duration: 0.14, freq: 900, endFreq: 300, filter: "lowpass", gain: 0.12 });
+}

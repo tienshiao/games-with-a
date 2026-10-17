@@ -84,7 +84,11 @@ export function upright(model: THREE.Object3D, lift = 0, scale = 1): THREE.Group
 // on the side facing the camera. It rolls about its long axis — a slow
 // full spin on the menu, a gentle sway in flight — so the 3D shows.
 
-export function rocketModel(opts: { spin?: boolean } = {}): THREE.Group {
+// With `flame`, it is a rocket that takes off and lands: a jet of fire from
+// the nozzle as long as userData.thrust (0 to 1) says, and only rocking in
+// flight, not standing on the pad.
+
+export function rocketModel(opts: { spin?: boolean; flame?: boolean } = {}): THREE.Group {
   const group = new THREE.Group();
   const hull = new THREE.Group();
   group.add(hull);
@@ -130,10 +134,39 @@ export function rocketModel(opts: { spin?: boolean } = {}): THREE.Group {
   rim.position.set(3, 0, 9.2);
   hull.add(glass, rim);
 
+  let flame: THREE.Group | undefined;
+  if (opts.flame) {
+    // Cones with their bases on the nozzle, pointing back along -x.
+    const jet = (key: string, radius: number, length: number, color: number, opacity: number) =>
+      mesh(
+        geo(key, () =>
+          new THREE.ConeGeometry(radius, length, 8).rotateZ(Math.PI / 2).translate(-length / 2, 0, 0)
+        ),
+        new THREE.MeshBasicMaterial({
+          color,
+          transparent: true,
+          opacity,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+        })
+      );
+    flame = new THREE.Group();
+    flame.position.x = -23;
+    flame.add(jet("rocket-flame", 6, 26, 0xff7a1a, 0.9), jet("rocket-flame-core", 3.6, 15, 0xfff2a8, 1));
+    group.add(flame);
+    group.userData.thrust = 0;
+  }
+
   let t = 0;
   hooks(group).sync = (dt) => {
     t += dt;
-    hull.rotation.x = opts.spin ? t * 0.9 : Math.sin(t * 1.3) * 0.3;
+    const thrust: number = group.userData.thrust ?? 1;
+    hull.rotation.x = opts.spin ? t * 0.9 : Math.sin(t * 1.3) * 0.3 * thrust;
+    if (flame) {
+      flame.visible = thrust > 0.01;
+      const flicker = 0.85 + Math.random() * 0.3;
+      flame.scale.set(thrust * flicker, 0.8 + 0.2 * thrust, 0.8 + 0.2 * thrust);
+    }
   };
   return group;
 }

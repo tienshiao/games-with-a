@@ -8,6 +8,8 @@ interface GameOverData {
   score?: number;
   /** Set when the player beat the level 4 boss rather than crashing. */
   cleared?: boolean;
+  /** What to call a cleared run; defaults to the magma level's. */
+  title?: string;
 }
 
 export class GameOverScene extends Phaser.Scene {
@@ -40,7 +42,7 @@ export class GameOverScene extends Phaser.Scene {
       return obj;
     };
 
-    add(0.25, cleared ? "MAGMA ESCAPED!" : "GAME OVER", {
+    add(0.25, cleared ? (data?.title ?? "MAGMA ESCAPED!") : "GAME OVER", {
       fontSize: cleared ? "42px" : "56px",
       fontFamily: "monospace",
       fontStyle: "bold",

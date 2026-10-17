@@ -2,16 +2,17 @@ import Phaser from "phaser";
 import * as THREE from "three";
 import { createTextures, CRYSTAL_SIZE, HERO_BODY, QBLOCK_SIZE, SLOT_SIZE } from "../textures";
 import { generateMagma, isRock, MAGMA_TILE, type MagmaWorld } from "../magma";
-import { playScore, playCrash, playPowerUp, playLevelClear } from "../sounds";
+import { playScore, playCrash, playPowerUp, playLevelClear, playLaunch, playLand } from "../sounds";
 import { DPad } from "../dpad";
 import { MagmaMonster, MONSTER_FORMS } from "../monster";
-import { view3d } from "../three/world3d";
+import { view3d, type ModelHooks } from "../three/world3d";
 import {
   crystalModel,
   emberModel,
   heroModel,
   magmaModel,
   qblockModel,
+  rocketModel,
   upright,
   HERO_FOOT,
   LAVA_DROP,
@@ -70,6 +71,18 @@ const CAMERAS = {
 const CAM_EASE = 5;
 const CAM_ZOOM_EASE = 1.6;
 
+// The rocket that comes for the hero once the boss is beaten: big enough to
+// hold it even boosted, landing this far ahead of it but well inside the
+// arena, coming down from this high.
+const ROCKET_SCALE = 7;
+/** From the rocket's middle down to its fin tips, so it stands on them. */
+const ROCKET_TAIL = 25 * ROCKET_SCALE;
+/** Its hull's radius: where the hero climbs in. */
+const ROCKET_HATCH = 9 * ROCKET_SCALE;
+const ROCKET_AHEAD = 320;
+const ROCKET_CLEARANCE = 170;
+const ROCKET_FROM = 2600;
+
 interface MagmaData {
   score?: number;
 }
@@ -89,7 +102,8 @@ interface MagmaData {
  * bursts, the power boost inside drops into the inventory slot, and the hero
  * grows. Past it is the arena and the boss (see monster.ts). Ram it while it
  * has cooled and it takes a hit; touch it while it is molten and it costs a
- * life. Beating its last form finishes the run.
+ * life. Beating its last form brings a rocket down into the arena, which
+ * takes the hero on to planet NUCLEAR (see NuclearScene).
  *
  * Running out of lives ends the game — unless the block has been opened.
  * From then on it is a checkpoint, and the hero starts again in front of it.
@@ -138,6 +152,8 @@ export class MagmaScene extends Phaser.Scene {
   private lastSafe = { x: 0, y: 0, rotation: 0 };
   /** The hero's position in the 3D world, for scenery that keeps near it. */
   private focus = new THREE.Vector3();
+  /** Only once the boss is beaten and the rocket is on its way. */
+  private rocket?: THREE.Group;
 
   constructor() {
     super({ key: "MagmaScene" });
@@ -159,6 +175,7 @@ export class MagmaScene extends Phaser.Scene {
     this.heroZ = 0;
     this.cam = { ...CAMERAS.walk };
     this.slotItem = undefined;
+    this.rocket = undefined;
 
     createTextures(this);
 
@@ -233,7 +250,9 @@ export class MagmaScene extends Phaser.Scene {
       camera.up.set(0, 0, 1);
       const { back, height, ahead, look } = this.cam;
       camera.position.set(this.focus.x - fx * back, this.focus.y - fy * back, height);
-      camera.lookAt(this.focus.x + fx * ahead, this.focus.y + fy * ahead, look);
+      // Looking up after the rocket as it takes off.
+      const climb = this.rocket ? Math.max(0, this.rocket.position.z - ROCKET_TAIL) * 0.8 : 0;
+      camera.lookAt(this.focus.x + fx * ahead, this.focus.y + fy * ahead, look + climb);
     });
   }
 
@@ -711,10 +730,93 @@ export class MagmaScene extends Phaser.Scene {
       repeat: 3,
     });
 
-    this.time.delayedCall(2700, () => {
-      this.cameras.main.fadeOut(300, 0, 0, 0);
-      this.time.delayedCall(320, () => {
-        this.scene.start("GameOverScene", { score: this.score, cleared: true });
+    this.time.delayedCall(2200, () => this.callRocket());
+  }
+
+  /**
+   * The way off this planet: a rocket comes down in the arena, the hero
+   * walks over and climbs in, and it takes off for planet NUCLEAR.
+   */
+  private callRocket(): void {
+    const arena = this.world.arena;
+    const x = Phaser.Math.Clamp(
+      this.hero.x + Math.cos(this.hero.rotation) * ROCKET_AHEAD,
+      arena.x + ROCKET_CLEARANCE,
+      arena.x + arena.width - ROCKET_CLEARANCE
+    );
+    const y = Phaser.Math.Clamp(
+      this.hero.y + Math.sin(this.hero.rotation) * ROCKET_AHEAD,
+      arena.y + ROCKET_CLEARANCE,
+      arena.y + arena.height - ROCKET_CLEARANCE
+    );
+
+    const model = rocketModel({ flame: true });
+    model.userData.thrust = 1;
+    // Stood on its tail: the nose (+x) turned to point up (+z).
+    model.rotation.y = -Math.PI / 2;
+    model.scale.setScalar(ROCKET_SCALE);
+    const rocket = new THREE.Group();
+    rocket.add(model);
+    rocket.position.set(x, -y, ROCKET_FROM);
+    rocket.userData.sync = (dt: number) => (model.userData as ModelHooks).sync?.(dt);
+    view3d(this).add(rocket);
+    this.rocket = rocket;
+    playLaunch();
+
+    this.tweens.add({
+      targets: rocket.position,
+      z: ROCKET_TAIL,
+      duration: 1700,
+      ease: "Cubic.easeOut",
+      onComplete: () => {
+        playLand();
+        this.tweens.add({ targets: model.userData, thrust: 0, duration: 400 });
+        this.boardRocket(x, y, model);
+      },
+    });
+  }
+
+  private boardRocket(x: number, y: number, model: THREE.Group): void {
+    // Turn to face it and walk over to the hatch in its side, then shrink
+    // in through it.
+    const angle = Math.atan2(y - this.hero.y, x - this.hero.x);
+    const dist = Math.max(0, Phaser.Math.Distance.Between(this.hero.x, this.hero.y, x, y) - ROCKET_HATCH);
+    this.hero.rotation = angle;
+    this.hero.anims.play("hero-walk", true);
+    const walk = (dist / HERO_SPEED) * 1000;
+    this.tweens.add({
+      targets: this.hero,
+      x: this.hero.x + Math.cos(angle) * dist,
+      y: this.hero.y + Math.sin(angle) * dist,
+      duration: walk,
+      delay: 250,
+      onComplete: () => {
+        this.hero.anims.stop();
+        this.hero.setFrame(0);
+      },
+    });
+    this.tweens.add({
+      targets: this.hero,
+      scale: 0,
+      delay: 250 + walk - 220,
+      duration: 260,
+      ease: "Quad.easeIn",
+    });
+
+    this.time.delayedCall(250 + walk + 500, () => {
+      playLaunch();
+      this.cameras.main.shake(1000, 0.006);
+      this.flashMessage("TO PLANET NUCLEAR!", "#9dff7a");
+      this.tweens.add({ targets: model.userData, thrust: 1, duration: 300 });
+      this.tweens.add({
+        targets: this.rocket!.position,
+        z: ROCKET_FROM * 2,
+        duration: 2400,
+        ease: "Quad.easeIn",
+      });
+      this.time.delayedCall(1700, () => {
+        this.cameras.main.fadeOut(500, 0, 0, 0);
+        this.time.delayedCall(520, () => this.scene.start("NuclearScene", { score: this.score }));
       });
     });
   }
